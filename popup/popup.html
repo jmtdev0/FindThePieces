@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>FindThePieces Popup</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Upload your images</h1>
+    <p class="subtitle">Add one or more images to start your puzzle journey.</p>
+    <label class="upload-btn">
+      <input type="file" id="imageInput" accept="image/*" multiple hidden>
+      <span>Choose Images</span>
+    </label>
+    <div id="previewContainer" class="preview-container"></div>
+  </div>
+  <style>
+    html, body {
+      width: 800px !important;
+      height: 600px !important;
+      min-width: 800px !important;
+      min-height: 600px !important;
+      max-width: 800px !important;
+      max-height: 600px !important;
+      overflow: hidden;
+    }
+  </style>
+  <script src="popup.js"></script>
+</body>
+</html>
