@@ -1,9 +1,44 @@
-.preview-wrapper {
+.preview-side {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 10px;
+  height: 100%;
+  min-width: 220px;
+  max-width: 260px;
+}
+.puzzle-toggle {
+  margin-top: 8px;
+  display: flex;
   align-items: center;
-  margin-bottom: 8px;
+  justify-content: center;
+}
+.puzzle-checkbox {
+  accent-color: #b2d900;
+  margin-right: 8px;
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+}
+.puzzle-toggle label {
+  color: #ff9100;
+  font-weight: 600;
+  font-size: 1em;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.preview-wrapper {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  margin-bottom: 18px;
   width: 100%;
+  gap: 24px;
+  justify-content: flex-start;
 }
 
 .preview-info {
@@ -114,13 +149,14 @@ html, body {
 }
 
 .preview-image {
-  width: auto;
-  max-width: 96%;
+  width: 320px;
+  height: auto;
+  max-width: 320px;
   max-height: 180px;
   border-radius: 14px;
   box-shadow: 0 2px 12px rgba(255, 180, 60, 0.13);
   border: 2.5px solid #ff9100;
-  object-fit: contain;
+  object-fit: cover;
   display: block;
   background: #faffd1;
   transition: box-shadow 0.2s, border 0.2s;
@@ -128,4 +164,27 @@ html, body {
 .preview-image:hover {
   box-shadow: 0 4px 24px #b2d90055;
   border: 2.5px solid #b2d900;
+  z-index: 10;
+}
+
+/* Floating full image preview on hover */
+.preview-wrapper {
+  position: relative;
+}
+.full-image-popup {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -60%);
+  max-width: 420px;
+  max-height: 420px;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px #b2d90055, 0 2px 12px #ff910088;
+  border: 3px solid #ff9100;
+  background: #fffbe6;
+  z-index: 9999;
+}
+.preview-image:hover + .full-image-popup {
+  display: block;
 }
