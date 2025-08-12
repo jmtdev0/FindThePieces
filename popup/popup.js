@@ -90,7 +90,8 @@ function renderPreviews() {
     img.alt = 'Preview';
     img.className = 'preview-image';
 
-    // Lateral info + toggle container
+
+    // Lateral info + toggle + delete button container
     const side = document.createElement('div');
     side.className = 'preview-side';
 
@@ -117,8 +118,24 @@ function renderPreviews() {
     puzzleLabel.prepend(puzzleCheck);
     puzzleDiv.appendChild(puzzleLabel);
 
+    // Delete button
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'delete-image-btn';
+    deleteBtn.title = 'Delete image';
+    deleteBtn.innerHTML = '🗑️';
+    deleteBtn.onclick = () => {
+      const confirmDelete = confirm(`Are you sure you want to delete the image "${imgObj.name}"?`);
+      if (confirmDelete) {
+        allImages.splice(idx, 1);
+        saveImages();
+        renderPreviews();
+        console.log('[FindThePieces] Image deleted:', imgObj.name);
+      }
+    };
+
     side.appendChild(info);
     side.appendChild(puzzleDiv);
+    side.appendChild(deleteBtn);
 
     wrapper.appendChild(img);
 

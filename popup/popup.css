@@ -1,3 +1,22 @@
+.delete-image-btn {
+  margin-top: 14px;
+  background: linear-gradient(90deg, #ff9100 0%, #b2d900 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 1.2em;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(255, 180, 60, 0.10);
+  transition: background 0.2s, transform 0.2s;
+  outline: none;
+}
+.delete-image-btn:hover {
+  background: linear-gradient(90deg, #b2d900 0%, #ff9100 100%);
+  color: #fff;
+  transform: scale(1.08);
+}
 .preview-side {
   display: flex;
   flex-direction: column;
@@ -36,6 +55,7 @@
   flex-direction: row;
   align-items: flex-start;
   margin-bottom: 18px;
+  margin-left: 30px;
   width: 100%;
   gap: 24px;
   justify-content: flex-start;
@@ -140,6 +160,7 @@ html, body {
   margin-top: 8px;
   max-height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   width: 100%;
   background: linear-gradient(135deg, #faffd1 0%, #f9d423 100%);
   border-radius: 14px;
@@ -173,17 +194,17 @@ html, body {
 }
 .full-image-popup {
   display: none;
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -60%);
-  max-width: 420px;
-  max-height: 420px;
+  position: fixed;
+  left: 50vw;
+  top: 50vh;
+  transform: translate(-50%, -50%);
+  max-width: 480px;
+  max-height: 320px;
   border-radius: 16px;
   box-shadow: 0 8px 32px #b2d90055, 0 2px 12px #ff910088;
   border: 3px solid #ff9100;
   background: #fffbe6;
-  z-index: 9999;
+  z-index: 2147483647;
 }
 .preview-image:hover + .full-image-popup {
   display: block;
