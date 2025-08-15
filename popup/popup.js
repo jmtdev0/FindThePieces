@@ -86,7 +86,12 @@ function saveImages() {
 }
 
 function renderPreviews() {
+
+  // Mostrar título, subtítulo e input al volver a la vista principal
+  var uploadBlock = document.getElementById('uploadBlock');
+  if (uploadBlock) uploadBlock.style.display = '';
   previewContainer.innerHTML = '';
+  
   console.log('[FindThePieces] Rendering previews:', allImages);
   allImages.forEach((imgObj, idx) => {
     const wrapper = document.createElement('div');
@@ -125,19 +130,28 @@ function renderPreviews() {
       if (Array.isArray(imgObj.collectedPieces) && imgObj.collectedPieces.length > 0) {
         const imgEl = new window.Image();
         imgEl.onload = function() {
-          const pieceW = imgObj.width / 5;
-          const pieceH = imgObj.height / 2;
-          const scaleX = width / imgObj.width;
-          const scaleY = height / imgObj.height;
+          // Adaptar a 3x3 piezas cuadradas
+          const rows = 3, cols = 3;
+          const minSide = Math.min(imgObj.width, imgObj.height);
+          const pieceW = minSide / cols;
+          const pieceH = minSide / rows;
+          const scaleX = width / minSide;
+          const scaleY = height / minSide;
           imgObj.collectedPieces.forEach(pieceIdx => {
-            const col = pieceIdx % 5;
-            const row = Math.floor(pieceIdx / 5);
-            const sx = col * pieceW;
-            const sy = row * pieceH;
+            const col = pieceIdx % cols;
+            const row = Math.floor(pieceIdx / cols);
+            let sx = col * pieceW;
+            let sy = row * pieceH;
+            // Centrar el recorte si la imagen no es cuadrada
+            if (imgObj.width > imgObj.height) {
+              sx += (imgObj.width - minSide) / 2;
+            } else if (imgObj.height > imgObj.width) {
+              sy += (imgObj.height - minSide) / 2;
+            }
             ctx.drawImage(
               imgEl,
               sx, sy, pieceW, pieceH,
-              Math.round(sx * scaleX), Math.round(sy * scaleY),
+              Math.round(col * pieceW * scaleX), Math.round(row * pieceH * scaleY),
               Math.round(pieceW * scaleX), Math.round(pieceH * scaleY)
             );
           });
@@ -188,7 +202,7 @@ function renderPreviews() {
       const collected = Array.isArray(imgObj.collectedPieces) ? imgObj.collectedPieces.length : 0;
       counter = document.createElement('div');
       counter.className = 'piece-counter';
-      counter.textContent = `Pieces found: ${collected}/10`;
+  counter.textContent = `Pieces found: ${collected}/9`;
     }
 
     // Delete button
@@ -237,27 +251,136 @@ function renderPreviews() {
 }
 
 function renderDetailView(imgObj, idx) {
+
+  // Ocultar título, subtítulo e input al entrar en detalle
+  var uploadBlock = document.getElementById('uploadBlock');
+  if (uploadBlock) uploadBlock.style.display = 'none';
+
+  // Puzzle grid config (3x3 cuadrado)
+  const rows = 3, cols = 3;
+  const totalPieces = rows * cols;
+  // Usar el menor lado para piezas cuadradas
+  const minSide = Math.min(imgObj.width, imgObj.height);
+  const pieceW = minSide / cols;
+  const pieceH = minSide / rows;
+  const gridSize = 270;
+  const cellW = Math.floor(gridSize / cols);
+  const cellH = Math.floor(gridSize / rows);
+
+  // Estado de rotación de cada pieza (por índice en puzzleState)
+  let rotationState = Array(totalPieces).fill(0);
+  if (Array.isArray(imgObj.rotationState) && imgObj.rotationState.length === totalPieces) {
+    rotationState = [...imgObj.rotationState];
+  }
+
+  // Leyenda de controles (solo si hay pieza seleccionada)
+  let legend = null;
+  function showLegend() {
+    if (legend) legend.remove();
+    if (selectedIdx !== null) {
+      legend = document.createElement('div');
+      legend.className = 'puzzle-legend';
+      legend.style.margin = '12px 0';
+      legend.style.fontSize = '14px';
+      legend.style.color = '#666';
+      legend.innerHTML = 'Puedes mover la pieza seleccionada con las flechas del teclado y girarla 90° pulsando <b>R</b>.';
+      previewContainer.insertBefore(legend, puzzleDiv);
+    }
+  }
+
+  // Manejar movimiento con flechas del teclado y giro
+  document.addEventListener('keydown', handleKeyControls);
+  function handleKeyControls(e) {
+    if (selectedIdx === null) return;
+    let dir = null;
+    if (e.key === 'ArrowUp') dir = -cols;
+    else if (e.key === 'ArrowDown') dir = cols;
+    else if (e.key === 'ArrowLeft') dir = -1;
+    else if (e.key === 'ArrowRight') dir = 1;
+    if (dir !== null) {
+      const targetIdx = selectedIdx + dir;
+      // Comprobar límites y adyacencia
+      if (targetIdx < 0 || targetIdx >= totalPieces || !isAdjacent(selectedIdx, targetIdx)) return;
+      // Intercambiar si hay pieza, mover si está vacío
+      if (puzzleState[targetIdx] !== null) {
+        // Intercambiar piezas y rotaciones
+        const temp = puzzleState[targetIdx];
+        puzzleState[targetIdx] = puzzleState[selectedIdx];
+        puzzleState[selectedIdx] = temp;
+        // Intercambiar rotación
+        const tempRot = rotationState[targetIdx];
+        rotationState[targetIdx] = rotationState[selectedIdx];
+        rotationState[selectedIdx] = tempRot;
+        selectedIdx = targetIdx;
+      } else {
+        // Mover a casilla vacía y rotación
+        puzzleState[targetIdx] = puzzleState[selectedIdx];
+        rotationState[targetIdx] = rotationState[selectedIdx];
+        puzzleState[selectedIdx] = null;
+        rotationState[selectedIdx] = 0;
+        selectedIdx = targetIdx;
+      }
+      renderGrid();
+      checkWin();
+      savePuzzleState();
+      saveRotationState();
+      showLegend();
+      return;
+    }
+    // Girar pieza seleccionada con R
+    if (e.key.toLowerCase() === 'r') {
+      rotationState[selectedIdx] = ((rotationState[selectedIdx] || 0) + 1) % 4;
+      renderGrid();
+      saveRotationState();
+      showLegend();
+      checkWin();
+    }
+  }
+
+  // Guardar el estado de rotación en la imagen
+  function saveRotationState() {
+    allImages[idx].rotationState = [...rotationState];
+    saveImages();
+  }
+
+  // Limpiar listener al salir de la vista detalle
+  function cleanupDetailView() {
+    document.removeEventListener('keydown', handleKeyControls);
+  }
+
   previewContainer.innerHTML = '';
+
   const backBtn = document.createElement('button');
+  backBtn.addEventListener('click', cleanupDetailView);
   backBtn.textContent = '← Back';
   backBtn.className = 'back-btn';
   backBtn.onclick = renderPreviews;
-  previewContainer.appendChild(backBtn);
 
-  // Puzzle grid config
-  const rows = 2, cols = 5;
-  const totalPieces = rows * cols;
-  const pieceW = imgObj.width / cols;
-  const pieceH = imgObj.height / rows;
-  const gridSize = 250;
-  const cellW = Math.floor(gridSize / cols);
-  const cellH = Math.floor(gridSize / rows);
+  previewContainer.appendChild(backBtn);
 
   // Estado del puzzle: array con el índice de la pieza en cada celda (o null si no recogida)
   let puzzleState = [];
   if (Array.isArray(imgObj.puzzleState) && imgObj.puzzleState.length === totalPieces) {
     puzzleState = [...imgObj.puzzleState];
+    // Colocar automáticamente las nuevas piezas recogidas en huecos libres
+    if (Array.isArray(imgObj.collectedPieces)) {
+      // Buscar qué piezas recogidas no están en el puzzleState
+      const placed = puzzleState.filter(x => x !== null);
+      const toPlace = imgObj.collectedPieces.filter(pieceIdx => !placed.includes(pieceIdx));
+      // Buscar huecos libres
+      const freeSlots = [];
+      for (let i = 0; i < puzzleState.length; i++) {
+        if (puzzleState[i] === null) freeSlots.push(i);
+      }
+      // Repartir aleatoriamente las nuevas piezas en los huecos
+      toPlace.forEach(pieceIdx => {
+        if (freeSlots.length === 0) return;
+        const slotIdx = freeSlots.splice(Math.floor(Math.random() * freeSlots.length), 1)[0];
+        puzzleState[slotIdx] = pieceIdx;
+      });
+    }
   } else {
+    // Inicializar: colocar todas las piezas recogidas en las primeras posiciones libres
     puzzleState = Array(totalPieces).fill(null);
     if (Array.isArray(imgObj.collectedPieces)) {
       imgObj.collectedPieces.forEach((pieceIdx, i) => {
@@ -281,9 +404,6 @@ function renderDetailView(imgObj, idx) {
   puzzleDiv.style.gridTemplateColumns = `repeat(${cols}, ${cellW}px)`;
   puzzleDiv.style.gap = '2px';
 
-  // Drag & drop variables
-  let dragIdx = null;
-
   // Renderizar las piezas en la rejilla
   function renderGrid() {
     puzzleDiv.innerHTML = '';
@@ -301,7 +421,7 @@ function renderDetailView(imgObj, idx) {
       cell.style.cursor = pieceIdx !== null ? 'grab' : 'default';
       cell.dataset.index = i;
       if (pieceIdx !== null) {
-        // Dibujar la pieza
+        // Dibujar la pieza cuadrada con rotación
         const canvas = document.createElement('canvas');
         canvas.width = cellW;
         canvas.height = cellH;
@@ -310,46 +430,58 @@ function renderDetailView(imgObj, idx) {
         imgEl.onload = function() {
           const col = pieceIdx % cols;
           const row = Math.floor(pieceIdx / cols);
-          const sx = col * pieceW;
-          const sy = row * pieceH;
+          // Ajustar el recorte para cuadrado centrado
+          let sx = col * pieceW;
+          let sy = row * pieceH;
+          if (imgObj.width > imgObj.height) {
+            sx += (imgObj.width - minSide) / 2;
+          } else if (imgObj.height > imgObj.width) {
+            sy += (imgObj.height - minSide) / 2;
+          }
+          ctx.save();
+          ctx.translate(cellW/2, cellH/2);
+          ctx.rotate((rotationState[i] || 0) * Math.PI/2);
+          ctx.translate(-cellW/2, -cellH/2);
           ctx.drawImage(
             imgEl,
             sx, sy, pieceW, pieceH,
             0, 0, cellW, cellH
           );
+          ctx.restore();
         };
         imgEl.src = imgObj.src;
         cell.appendChild(canvas);
-        // Drag events
-        cell.draggable = true;
-        cell.addEventListener('dragstart', (e) => {
-          dragIdx = i;
-          cell.style.opacity = '0.5';
-        });
-        cell.addEventListener('dragend', (e) => {
-          dragIdx = null;
-          cell.style.opacity = '1';
-        });
       }
-      // Drop events
-      cell.addEventListener('dragover', (e) => {
-        e.preventDefault();
-      });
-      cell.addEventListener('drop', (e) => {
-        e.preventDefault();
-        const targetIdx = i;
-        if (dragIdx !== null && puzzleState[targetIdx] === null && isAdjacent(dragIdx, targetIdx)) {
-          puzzleState[targetIdx] = puzzleState[dragIdx];
-          puzzleState[dragIdx] = null;
-          dragIdx = null;
-          renderGrid();
-          checkWin();
-          savePuzzleState();
-        }
-      });
+      if (selectedIdx === i) {
+        cell.style.outline = '3px solid #b2d900';
+      }
       puzzleDiv.appendChild(cell);
     }
+    showLegend();
   }
+
+  // Movimiento de piezas: solo se pueden mover a celdas vacías adyacentes
+  let selectedIdx = null;
+  puzzleDiv.addEventListener('click', function(e) {
+    const cell = e.target.closest('.sliding-cell');
+    if (!cell) return;
+    const idx = parseInt(cell.dataset.index);
+    if (puzzleState[idx] === null) {
+      // Si hay una pieza seleccionada y es adyacente, mover
+      if (selectedIdx !== null && isAdjacent(selectedIdx, idx)) {
+        puzzleState[idx] = puzzleState[selectedIdx];
+        puzzleState[selectedIdx] = null;
+        selectedIdx = null;
+        renderGrid();
+        checkWin();
+        savePuzzleState();
+      }
+    } else {
+      // Seleccionar/des-seleccionar pieza
+      selectedIdx = selectedIdx === idx ? null : idx;
+      renderGrid();
+    }
+  });
 
   // Comprobar si dos celdas son adyacentes
   function isAdjacent(a, b) {
@@ -366,57 +498,32 @@ function renderDetailView(imgObj, idx) {
 
   // Comprobar si el puzzle está resuelto
   function checkWin() {
+    // Deben estar todas las piezas y en orden
     for (let i = 0; i < totalPieces; i++) {
-      if (puzzleState[i] !== i) return;
+      if (puzzleState[i] !== i || (rotationState && rotationState[i] !== 0)) return;
     }
+    // Mostrar mensaje de éxito por encima del puzzle
     const winMsg = document.createElement('div');
     winMsg.className = 'puzzle-win-msg';
     winMsg.textContent = '¡Puzzle completado!';
-    previewContainer.appendChild(winMsg);
+    // Insertar antes del puzzleDiv
+    if (previewContainer.contains(puzzleDiv)) {
+      previewContainer.insertBefore(winMsg, puzzleDiv);
+    } else {
+      previewContainer.appendChild(winMsg);
+    }
   }
 
   // Render inicial
+  previewContainer.innerHTML = '';
+  previewContainer.appendChild(backBtn);
   renderGrid();
   previewContainer.appendChild(puzzleDiv);
+  checkWin();
 
   // Datos
   const meta = document.createElement('div');
   meta.className = 'detail-meta';
   meta.innerHTML = `<b>Name:</b> ${imgObj.name}<br><b>Date:</b> ${new Date(imgObj.date).toLocaleString()}<br><b>Size:</b> ${imgObj.width} x ${imgObj.height}`;
   previewContainer.appendChild(meta);
-
-  // Piezas recogidas
-  const piecesDiv = document.createElement('div');
-  piecesDiv.className = 'detail-pieces';
-  piecesDiv.innerHTML = '<b>Collected pieces:</b>';
-  // Mostrar cada pieza recogida como miniatura
-  if (Array.isArray(imgObj.collectedPieces) && imgObj.collectedPieces.length > 0) {
-    const imgEl = new window.Image();
-    imgEl.onload = function() {
-      const pieceW = imgObj.width / 5;
-      const pieceH = imgObj.height / 2;
-      imgObj.collectedPieces.forEach(pieceIdx => {
-        const col = pieceIdx % 5;
-        const row = Math.floor(pieceIdx / 5);
-        const sx = col * pieceW;
-        const sy = row * pieceH;
-        // Canvas para la pieza
-        const c = document.createElement('canvas');
-        c.width = 40;
-        c.height = 40;
-        const ctx = c.getContext('2d');
-        ctx.drawImage(
-          imgEl,
-          sx, sy, pieceW, pieceH,
-          0, 0, 40, 40
-        );
-        c.className = 'piece-thumb';
-        piecesDiv.appendChild(c);
-      });
-    };
-    imgEl.src = imgObj.src;
-  } else {
-    piecesDiv.innerHTML += ' <span style="color:#bbb">(none yet)</span>';
-  }
-  previewContainer.appendChild(piecesDiv);
 }

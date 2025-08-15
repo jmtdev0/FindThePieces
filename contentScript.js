@@ -24,7 +24,7 @@
       // Recuperar piezas recogidas
       const collected = Array.isArray(img.collectedPieces) ? img.collectedPieces : [];
       // Elegir una pieza no recogida
-      const availablePieces = Array.from({length: 10}, (_, i) => i).filter(i => !collected.includes(i));
+  const availablePieces = Array.from({length: 9}, (_, i) => i).filter(i => !collected.includes(i));
       if (availablePieces.length === 0) return; // Todas recogidas
       const pieceIndex = availablePieces[Math.floor(Math.random() * availablePieces.length)];
       // Calcular dimensiones
