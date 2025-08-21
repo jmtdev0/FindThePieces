@@ -3,7 +3,88 @@
 
 const imageInput = document.getElementById('imageInput');
 const previewContainer = document.getElementById('previewContainer');
+const modal = document.getElementById('uploadModal');
+const chooseImagesBtn = document.getElementById('chooseImagesBtn');
+const puzzleDifficulty = document.getElementById('puzzleDifficulty');
 let allImages = [];
+
+// Modal handling
+chooseImagesBtn.addEventListener('click', () => {
+    modal.classList.add('show');
+});
+
+modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+        modal.classList.remove('show');
+    }
+});
+
+// Drag and drop handling
+const uploadArea = modal.querySelector('.upload-area');
+
+uploadArea.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    uploadArea.style.borderColor = '#ff9100';
+    uploadArea.style.background = 'rgba(255,145,0,0.1)';
+});
+
+uploadArea.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    uploadArea.style.borderColor = '#b2d900';
+    uploadArea.style.background = 'transparent';
+});
+
+uploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+});
+
+uploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadArea.style.borderColor = '#b2d900';
+    uploadArea.style.background = 'transparent';
+    
+    const files = Array.from(e.dataTransfer.files);
+    handleFiles(files);
+});
+
+function handleFiles(files) {
+    let newImages = [];
+    let filesProcessed = 0;
+
+    files.forEach((file) => {
+        if (file && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const imgEl = new window.Image();
+                imgEl.onload = function() {
+                    const size = parseInt(puzzleDifficulty.value);
+                    newImages.push({
+                        src: e.target.result,
+                        name: file.name,
+                        date: new Date(),
+                        puzzle: true,
+                        width: imgEl.naturalWidth,
+                        height: imgEl.naturalHeight,
+                        frequency: 10,
+                        gridSize: size, // Guardamos el tamaño del grid
+                        totalPieces: size * size // Guardamos el total de piezas
+                    });
+                    filesProcessed++;
+                    if (filesProcessed === files.length) {
+                        allImages = allImages.concat(newImages);
+                        saveImages();
+                        renderPreviews();
+                        modal.classList.remove('show');
+                    }
+                };
+                imgEl.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        } else {
+            filesProcessed++;
+        }
+    });
+}
 
 document.addEventListener('DOMContentLoaded', () => {
 	if (chrome && chrome.storage && chrome.storage.local) {
@@ -21,44 +102,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 imageInput.addEventListener('change', (event) => {
-	const files = Array.from(event.target.files);
-	let newImages = [];
-	let filesProcessed = 0;
-	files.forEach((file) => {
-		if (file && file.type.startsWith('image/')) {
-			const reader = new FileReader();
-			reader.onload = function(e) {
-				const imgEl = new window.Image();
-				imgEl.onload = function() {
-					newImages.push({
-						src: e.target.result,
-						name: file.name,
-						date: new Date(),
-						puzzle: true, // Siempre se establece a true al añadir una nueva imagen
-						width: imgEl.naturalWidth,
-						height: imgEl.naturalHeight,
-						frequency: 10 // Valor por defecto
-					});
-					filesProcessed++;
-					if (filesProcessed === files.length) {
-						allImages = allImages.concat(newImages);
-						saveImages();
-						renderPreviews();
-					}
-				};
-				imgEl.src = e.target.result;
-			};
-			reader.readAsDataURL(file);
-		} else {
-			filesProcessed++;
-			if (filesProcessed === files.length) {
-				allImages = allImages.concat(newImages);
-				saveImages();
-				renderPreviews();
-			}
-		}
-	});
-	imageInput.value = '';
+    const files = Array.from(event.target.files);
+    handleFiles(files);
+    imageInput.value = '';
 });
 
 function saveImages() {
@@ -68,7 +114,24 @@ function saveImages() {
 	}
 }
 
+// Función para limpiar popups obsoletos
+function cleanupObsoletePopups() {
+    const currentImageIndexes = allImages.map((_, idx) => idx.toString());
+    document.querySelectorAll('.preview-hover-popup').forEach(popup => {
+        const popupIndex = popup.getAttribute('data-image-index');
+        if (!currentImageIndexes.includes(popupIndex)) {
+            popup.remove();
+        }
+    });
+}
+
 function renderPreviews() {
+	// Ocultar todos los popups antes de mostrar la galería
+	hideAllHoverPopups();
+	
+	// Actualizar el título de la página a Gallery
+	document.title = 'Find The Pieces - Gallery';
+	
 	var uploadBlock = document.getElementById('uploadBlock');
 	if (uploadBlock) uploadBlock.style.display = '';
 	
@@ -97,51 +160,65 @@ function renderPreviews() {
 		}
 		let img;
 		if (imgObj.puzzle) {
-			const canvas = document.createElement('canvas');
-			// DPR-aware canvas: use devicePixelRatio for pixel backing store
-			const dpr = window.devicePixelRatio || 1;
-			canvas.width = Math.round(width * dpr);
-			canvas.height = Math.round(height * dpr);
-			canvas.style.width = width + 'px';
-			canvas.style.height = height + 'px';
-			canvas.className = 'preview-image puzzle-border-only';
-			// No rounded corners on preview piece canvases
-			canvas.style.borderRadius = '0';
-			const ctx = canvas.getContext('2d');
-			ctx.scale(dpr, dpr);
-			if (Array.isArray(imgObj.collectedPieces) && imgObj.collectedPieces.length > 0) {
-				const imgEl = new window.Image();
-				imgEl.onload = function() {
-					const rows = 3, cols = 3;
-					// Use actual image natural dimensions for source cropping
-					const srcW = imgEl.naturalWidth || imgObj.width;
-					const srcH = imgEl.naturalHeight || imgObj.height;
-					const srcPieceW = srcW / cols;
-					const srcPieceH = srcH / rows;
-					// Calculamos el tamaño de las piezas en el canvas para ocupar todo el espacio
-					const cellW = width / cols;
-					const cellH = height / rows;
-					imgObj.collectedPieces.forEach(pieceIdx => {
-						const col = pieceIdx % cols;
-						const row = Math.floor(pieceIdx / cols);
-						const sx = col * srcPieceW;
-						const sy = row * srcPieceH;
-						// Destination rect in canvas should be integer pixels
-						const dx = Math.round(col * cellW);
-						const dy = Math.round(row * cellH);
-						const dW = Math.round(cellW);
-						const dH = Math.round(cellH);
-						// draw using logical coordinates (ctx already scaled)
-						ctx.drawImage(
-							imgEl,
-							sx, sy, srcPieceW, srcPieceH,
-							dx, dy, dW, dH
-						);
-					});
-				};
-				imgEl.src = imgObj.src;
+			img = document.createElement('img');
+			img.src = imgObj.src;
+			img.alt = 'Preview';
+			img.className = 'preview-image puzzle-border-only';
+			img.style.width = width + 'px';
+			img.style.height = height + 'px';
+			img.style.borderRadius = '0';
+			img.style.display = 'block';
+			img.style.margin = '0 auto';
+
+			// Usar el popup existente o crear uno nuevo si no existe
+			let hoverPopup = document.querySelector(`.preview-hover-popup[data-image-index="${idx}"]`);
+			
+			if (!hoverPopup) {
+				hoverPopup = document.createElement('div');
+				hoverPopup.className = 'preview-hover-popup' + (imgObj.completed ? ' completed' : '');
+				hoverPopup.setAttribute('data-image-index', idx);
+				const popupImg = document.createElement('img');
+				popupImg.src = imgObj.src;
+				hoverPopup.appendChild(popupImg);
+				document.body.appendChild(hoverPopup);
 			}
-			img = canvas;
+
+			// Eventos de mouse para mostrar/ocultar el popup
+			img.addEventListener('mouseenter', () => {
+				// Ocultar cualquier otro popup visible primero
+				document.querySelectorAll('.preview-hover-popup').forEach(popup => {
+					if (popup !== hoverPopup) {
+						popup.style.display = 'none';
+					}
+				});
+				hoverPopup.style.display = 'block';
+			});
+
+			img.addEventListener('mousemove', (e) => {
+				const rect = hoverPopup.getBoundingClientRect();
+				const viewportWidth = window.innerWidth;
+				const viewportHeight = window.innerHeight;
+				
+				// Calcular la posición preferida (a la derecha y abajo del cursor)
+				let x = e.clientX + 20;
+				let y = e.clientY + 20;
+				
+				// Ajustar si se sale de la pantalla
+				if (x + rect.width > viewportWidth) {
+					x = e.clientX - rect.width - 20;
+				}
+				if (y + rect.height > viewportHeight) {
+					y = e.clientY - rect.height - 20;
+				}
+				
+				hoverPopup.style.left = x + 'px';
+				hoverPopup.style.top = y + 'px';
+			});
+
+			img.addEventListener('mouseleave', () => {
+				hoverPopup.style.display = 'none';
+			});
+
 		} else {
 			img = document.createElement('img');
 			img.src = imgObj.src;
@@ -203,9 +280,17 @@ function renderPreviews() {
 		let counter = null;
 		if (imgObj.puzzle) {
 			const collected = Array.isArray(imgObj.collectedPieces) ? imgObj.collectedPieces.length : 0;
+			const totalPieces = imgObj.totalPieces || 9; // Usar el total guardado o 9 por compatibilidad
 			counter = document.createElement('div');
 			counter.className = 'piece-counter';
-		counter.textContent = `Pieces found: ${collected}/9`;
+			if (imgObj.completed) {
+				counter.className += ' completed';
+				counter.textContent = 'Completed ✅';
+				// Cambiar colores a lima cuando está completado
+				wrapper.classList.add('completed');
+			} else {
+				counter.textContent = `Pieces found: ${collected}/${totalPieces}`;
+			}
 		}
 		const deleteBtn = document.createElement('button');
 		deleteBtn.className = 'delete-image-btn';
@@ -216,6 +301,7 @@ function renderPreviews() {
 			if (confirmDelete) {
 				allImages.splice(idx, 1);
 				saveImages();
+				cleanupObsoletePopups();
 				renderPreviews();
 			}
 		};
@@ -242,11 +328,26 @@ function renderPreviews() {
 	});
 }
 
+// Función para ocultar todos los popups de hover
+function hideAllHoverPopups() {
+    const popups = document.querySelectorAll('.preview-hover-popup');
+    popups.forEach(popup => {
+        popup.style.display = 'none';
+    });
+}
+
 function renderDetailView(imgObj, idx) {
+	// Ocultar todos los popups antes de mostrar el detalle
+	hideAllHoverPopups();
+	
+	// Actualizar el título de la página a Puzzle
+	document.title = 'Find The Pieces - Puzzle';
+	
 	var uploadBlock = document.getElementById('uploadBlock');
 	if (uploadBlock) uploadBlock.style.display = 'none';
-	const rows = 3, cols = 3;
-	const totalPieces = rows * cols;
+	const size = imgObj.gridSize || 3; // Usar tamaño guardado o 3x3 por compatibilidad
+	const rows = size, cols = size;
+	const totalPieces = size * size;
 	// Mantener la relación de aspecto de la imagen
 	const aspect = imgObj.width / imgObj.height;
 	const gridBase = 540; // tamaño base
@@ -321,17 +422,34 @@ function renderDetailView(imgObj, idx) {
 			collectedWrap.style.gap = '8px';
 			collectedWrap.style.marginTop = '18px';
 			collectedWrap.style.alignItems = 'center';
+			
+			if (imgObj.completed) {
+				collectedWrap.classList.add('completed');
+				const winMsg = document.createElement('div');
+				winMsg.className = 'puzzle-win-msg';
+				winMsg.textContent = 'Puzzle completed!';
+				winMsg.style.marginBottom = '16px';
+				collectedWrap.appendChild(winMsg);
+			}
 			const title = document.createElement('div');
-			title.style.color = '#ff9100';
+			title.style.color = imgObj.completed ? '#b2d900' : '#ff9100';
 			title.style.fontWeight = '600';
 			collectedWrap.appendChild(title);
+            console.log('Inicializando sistema de doble buffer');
+            // Crear un canvas buffer fuera de pantalla para todo el grid
+            const offscreenCanvas = document.createElement('canvas');
+            const dpr = window.devicePixelRatio || 1;
+            offscreenCanvas.style.display = 'none';
+            document.body.appendChild(offscreenCanvas);
+            console.log('Canvas offscreen creado y añadido al DOM (oculto)');
+
 			const grid = document.createElement('div');
 			grid.style.display = 'grid';
 			grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
 			grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
 			grid.style.gap = '2px';
 			grid.style.background = '#fffbe6';
-			grid.style.border = '4px solid #ff9100';
+			grid.style.border = `4px solid ${imgObj.completed ? '#b2d900' : '#ff9100'}`;
 			grid.style.padding = '2px';
 			// Límites máximos para el grid
 			const MAX_WIDTH = 1100;
@@ -360,13 +478,21 @@ function renderDetailView(imgObj, idx) {
 			grid.style.position = 'relative';
 
 			// Inicializamos el estado del puzzle para las piezas coleccionadas
-			let collectedPuzzleState = Array(totalPieces).fill(null);
-			collected.forEach((pieceIdx, i) => {
-				collectedPuzzleState[i] = pieceIdx;
-			});
+			let collectedPuzzleState;
+			if (Array.isArray(imgObj.puzzleState) && imgObj.puzzleState.length === totalPieces) {
+				// Usar el estado guardado si existe
+				collectedPuzzleState = [...imgObj.puzzleState];
+			} else {
+				// Inicializar con las piezas en orden secuencial
+				collectedPuzzleState = Array(totalPieces).fill(null);
+				collected.forEach((pieceIdx, i) => {
+					collectedPuzzleState[i] = pieceIdx;
+				});
+			}
 
 			// Función para renderizar el grid de piezas coleccionadas
 			function renderCollectedGrid() {
+				console.log('Iniciando renderizado del grid completo');
 				grid.innerHTML = '';
 				for (let i = 0; i < totalPieces; i++) {
 					const cell = document.createElement('div');
@@ -380,38 +506,53 @@ function renderDetailView(imgObj, idx) {
 
 					const pieceIdx = collectedPuzzleState[i];
 					if (pieceIdx !== null) {
-						const canvas = document.createElement('canvas');
-						const dpr = window.devicePixelRatio || 1;
-						const cellW = gridWidth / cols;
-						const cellH = gridHeight / rows;
-						canvas.width = Math.round(cellW * dpr);
-						canvas.height = Math.round(cellH * dpr);
-						canvas.style.width = cellW + 'px';
-						canvas.style.height = cellH + 'px';
-						canvas.style.borderRadius = '0';
-						const ctx = canvas.getContext('2d');
-						ctx.scale(dpr, dpr);
+                        const canvas = document.createElement('canvas');
+                        const dpr = window.devicePixelRatio || 1;
+                        const cellW = gridWidth / cols;
+                        const cellH = gridHeight / rows;
+                        canvas.width = Math.round(cellW * dpr);
+                        canvas.height = Math.round(cellH * dpr);
+                        canvas.style.width = cellW + 'px';
+                        canvas.style.height = cellH + 'px';
+                        canvas.style.borderRadius = '0';
 
-						const imgThumb = new window.Image();
-						imgThumb.onload = function() {
-							const col = pieceIdx % cols;
-							const row = Math.floor(pieceIdx / cols);
-							const srcW = imgThumb.naturalWidth || imgObj.width;
-							const srcH = imgThumb.naturalHeight || imgObj.height;
-							const srcPieceW = srcW / cols;
-							const srcPieceH = srcH / rows;
-							const sx = col * srcPieceW;
-							const sy = row * srcPieceH;
+                        // Usar el canvas fuera de pantalla para pre-renderizar
+                        console.log(`[Pieza ${i}] Configurando offscreenCanvas - dimensiones: ${canvas.width}x${canvas.height}`);
+                        offscreenCanvas.width = canvas.width;
+                        offscreenCanvas.height = canvas.height;
+                        const offscreenCtx = offscreenCanvas.getContext('2d');
+                        offscreenCtx.scale(dpr, dpr);
 
-							ctx.save();
-							ctx.translate(cellW/2, cellH/2);
-							ctx.rotate((rotationState[i] || 0) * Math.PI/2);
-							ctx.translate(-cellW/2, -cellH/2);
-							ctx.drawImage(imgThumb, sx, sy, srcPieceW, srcPieceH, 0, 0, cellW, cellH);
-							ctx.restore();
-						};
-						imgThumb.src = imgObj.src;
-						cell.appendChild(canvas);
+                        const imgThumb = new window.Image();
+                        imgThumb.onload = function() {
+                            console.log(`[Pieza ${i}] Imagen cargada, preparando para dibujar`);
+                            const col = pieceIdx % cols;
+                            const row = Math.floor(pieceIdx / cols);
+                            const srcW = imgThumb.naturalWidth || imgObj.width;
+                            const srcH = imgThumb.naturalHeight || imgObj.height;
+                            const srcPieceW = srcW / cols;
+                            const srcPieceH = srcH / rows;
+                            const sx = col * srcPieceW;
+                            const sy = row * srcPieceH;
+
+                            console.log(`[Pieza ${i}] Dibujando en offscreenCanvas - Rotación: ${rotationState[i] * 90}°`);
+                            // Renderizar en el canvas fuera de pantalla primero
+                            offscreenCtx.save();
+                            offscreenCtx.translate(cellW/2, cellH/2);
+                            offscreenCtx.rotate((rotationState[i] || 0) * Math.PI/2);
+                            offscreenCtx.translate(-cellW/2, -cellH/2);
+                            offscreenCtx.drawImage(imgThumb, sx, sy, srcPieceW, srcPieceH, 0, 0, cellW, cellH);
+                            offscreenCtx.restore();
+                            console.log(`[Pieza ${i}] Dibujo en offscreenCanvas completado`);
+
+                            console.log(`[Pieza ${i}] Copiando de offscreenCanvas a canvas visible`);
+                            // Copiar al canvas visible de una sola vez
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(offscreenCanvas, 0, 0);
+                            console.log(`[Pieza ${i}] Canvas visible actualizado`);
+                        };
+                        imgThumb.src = imgObj.src;
+                        cell.appendChild(canvas);
 						cell.style.cursor = 'grab';
 					}
 
@@ -422,17 +563,42 @@ function renderDetailView(imgObj, idx) {
 					cell.addEventListener('click', function() {
 						if (collectedPuzzleState[i] === null) {
 							if (selectedCollectedIdx !== null && isAdjacent(selectedCollectedIdx, i)) {
+								// Obtener las celdas involucradas
+								const selectedCell = grid.children[selectedCollectedIdx];
+								const targetCell = cell;
+								
+								// Intercambiar los canvas
+								const selectedCanvas = selectedCell.querySelector('canvas');
+								targetCell.appendChild(selectedCanvas);
+								selectedCell.innerHTML = ''; // Vaciar la celda origen
+								
+								// Actualizar estados
 								collectedPuzzleState[i] = collectedPuzzleState[selectedCollectedIdx];
 								collectedPuzzleState[selectedCollectedIdx] = null;
 								rotationState[i] = rotationState[selectedCollectedIdx];
 								rotationState[selectedCollectedIdx] = 0;
+								
+								// Quitar el outline de la celda seleccionada
+								selectedCell.style.outline = '';
+								
 								selectedCollectedIdx = null;
-								renderCollectedGrid();
+								
+								// Guardar el estado actual
+								allImages[idx].puzzleState = [...collectedPuzzleState];
+								allImages[idx].rotationState = [...rotationState];
+								saveImages();
+								
 								checkCollectedWin();
 							}
 						} else {
+							// Actualizar la selección visual sin redibujar todo
+							if (selectedCollectedIdx !== null) {
+								grid.children[selectedCollectedIdx].style.outline = '';
+							}
 							selectedCollectedIdx = selectedCollectedIdx === i ? null : i;
-							renderCollectedGrid();
+							if (selectedCollectedIdx !== null) {
+								cell.style.outline = '3px solid #b2d900';
+							}
 						}
 					});
 
@@ -442,6 +608,207 @@ function renderDetailView(imgObj, idx) {
 
 			let selectedCollectedIdx = null;
 
+			// Función para mostrar popup de felicitación
+			function showCongratulationsPopup() {
+				const popup = document.createElement('div');
+				popup.id = 'congratulations-popup';
+				popup.style.cssText = `
+					position: fixed;
+					top: 50%;
+					left: 50%;
+					transform: translate(-50%, -50%) scale(0);
+					background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+					color: white;
+					padding: 30px;
+					border-radius: 20px;
+					text-align: center;
+					box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+					z-index: 10000;
+					font-family: Arial, sans-serif;
+					min-width: 350px;
+					animation: popup-appear 0.5s ease-out forwards;
+				`;
+
+				popup.innerHTML = `
+					<div style="font-size: 48px; margin-bottom: 15px;">🎉</div>
+					<h2 style="margin: 0 0 10px 0; font-size: 28px;">¡Felicitaciones!</h2>
+					<p style="margin: 0 0 20px 0; font-size: 16px; opacity: 0.9;">¡Has completado el puzzle!</p>
+					
+					<div style="margin-bottom: 20px;">
+						<p style="margin: 0 0 15px 0; font-size: 14px;">¿Quieres subir tu puzzle completado a Instagram?</p>
+						<div style="display: flex; gap: 10px; justify-content: center;">
+							<button id="upload-instagram" style="
+								background: linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%);
+								border: none;
+								color: white;
+								padding: 12px 20px;
+								border-radius: 25px;
+								cursor: pointer;
+								font-size: 14px;
+								font-weight: bold;
+								transition: all 0.3s ease;
+								display: flex;
+								align-items: center;
+								gap: 8px;
+							" onmouseover="this.style.transform='scale(1.05)'" 
+							   onmouseout="this.style.transform='scale(1)'">
+								📸 Subir a Instagram
+							</button>
+							<button id="skip-upload" style="
+								background: rgba(255,255,255,0.2);
+								border: 2px solid white;
+								color: white;
+								padding: 10px 20px;
+								border-radius: 25px;
+								cursor: pointer;
+								font-size: 14px;
+								transition: all 0.3s ease;
+							" onmouseover="this.style.background='rgba(255,255,255,0.3)'" 
+							   onmouseout="this.style.background='rgba(255,255,255,0.2)'">
+								Ahora no
+							</button>
+						</div>
+					</div>
+					
+					<div id="upload-status" style="margin-top: 15px; font-size: 14px; min-height: 20px;"></div>
+				`;
+
+				// Añadir keyframes para la animación del popup si no existen
+				if (!document.getElementById('popup-styles')) {
+					const style = document.createElement('style');
+					style.id = 'popup-styles';
+					style.textContent = `
+						@keyframes popup-appear {
+							0% {
+								transform: translate(-50%, -50%) scale(0);
+								opacity: 0;
+							}
+							100% {
+								transform: translate(-50%, -50%) scale(1);
+								opacity: 1;
+							}
+						}
+						@keyframes popup-disappear {
+							0% {
+								transform: translate(-50%, -50%) scale(1);
+								opacity: 1;
+							}
+							100% {
+								transform: translate(-50%, -50%) scale(0);
+								opacity: 0;
+							}
+						}
+						@keyframes spin {
+							0% { transform: rotate(0deg); }
+							100% { transform: rotate(360deg); }
+						}
+					`;
+					document.head.appendChild(style);
+				}
+
+				document.body.appendChild(popup);
+
+				// Manejar botones
+				const uploadBtn = popup.querySelector('#upload-instagram');
+				const skipBtn = popup.querySelector('#skip-upload');
+				const statusDiv = popup.querySelector('#upload-status');
+
+				// Función para cerrar el popup
+				const closePopup = () => {
+					popup.style.animation = 'popup-disappear 0.3s ease-in forwards';
+					setTimeout(() => {
+						if (popup.parentNode) {
+							popup.parentNode.removeChild(popup);
+						}
+					}, 300);
+				};
+
+				// Función para subir a Instagram
+				const uploadToInstagram = async () => {
+					try {
+						uploadBtn.disabled = true;
+						uploadBtn.innerHTML = '<span style="display: inline-block; width: 16px; height: 16px; border: 2px solid white; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span> Subiendo...';
+						statusDiv.textContent = 'Preparando imagen...';
+
+						// Generar imagen del puzzle completado
+						const puzzleImageBase64 = await generatePuzzleImage();
+						console.log('Generated image size:', puzzleImageBase64.length, 'characters');
+						
+						statusDiv.textContent = 'Enviando a CloudFlare Worker...';
+
+						// Enviar al Worker de CloudFlare
+						const response = await fetch('https://findthepieces-igproxy.jmtdev0.workers.dev/', {
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+							},
+							body: JSON.stringify({
+								imageBase64: puzzleImageBase64
+							})
+						});
+
+						console.log('Worker response status:', response.status);
+						console.log('Worker response headers:', Object.fromEntries(response.headers.entries()));
+
+						const result = await response.json();
+						console.log('Worker response body:', result);
+
+						if (response.ok && result.status_code === 200) {
+							statusDiv.innerHTML = `
+								<div style="color: #4CAF50;">✅ ¡Imagen subida exitosamente!</div>
+								<a href="${result.image.url}" target="_blank" style="color: #lightblue; text-decoration: underline; font-size: 12px;">Ver imagen</a>
+							`;
+							
+							// Esperar un poco y cerrar
+							setTimeout(closePopup, 3000);
+						} else {
+							throw new Error(result.error || 'Error al subir la imagen');
+						}
+
+					} catch (error) {
+						console.error('Error uploading to Instagram:', error);
+						statusDiv.innerHTML = `<div style="color: #ff6b6b;">❌ Error: ${error.message}</div>`;
+						uploadBtn.disabled = false;
+						uploadBtn.innerHTML = '📸 Subir a Instagram';
+					}
+				};
+
+				// Función para generar la imagen del puzzle
+				const generatePuzzleImage = async () => {
+					return new Promise((resolve) => {
+						// Crear un canvas para renderizar el puzzle completo
+						const canvas = document.createElement('canvas');
+						const ctx = canvas.getContext('2d');
+						
+						// Usar las dimensiones originales de la imagen
+						canvas.width = imgObj.width;
+						canvas.height = imgObj.height;
+						
+						const img = new Image();
+						img.onload = () => {
+							ctx.drawImage(img, 0, 0);
+							
+							// Convertir a base64 (sin el prefijo data:image/png;base64,)
+							const base64 = canvas.toDataURL('image/png').split(',')[1];
+							resolve(base64);
+						};
+						img.src = imgObj.src;
+					});
+				};
+
+				uploadBtn.addEventListener('click', uploadToInstagram);
+				skipBtn.addEventListener('click', closePopup);
+
+				// Cerrar con Escape
+				const handleEscape = (e) => {
+					if (e.key === 'Escape') {
+						closePopup();
+						document.removeEventListener('keydown', handleEscape);
+					}
+				};
+				document.addEventListener('keydown', handleEscape);
+			}
+
 			// Función para verificar si se ha completado el puzzle en el grid de piezas coleccionadas
 			function checkCollectedWin() {
 				for (let i = 0; i < totalPieces; i++) {
@@ -449,6 +816,18 @@ function renderDetailView(imgObj, idx) {
 						return;
 					}
 				}
+				// Marcar el puzzle como completado
+				imgObj.completed = true;
+				// Actualizar la clase del popup correspondiente
+				const hoverPopup = document.querySelector(`.preview-hover-popup[data-image-index="${idx}"]`);
+				if (hoverPopup) {
+					hoverPopup.classList.add('completed');
+				}
+				saveImages();
+				
+				// Mostrar popup de felicitación
+				showCongratulationsPopup();
+				
 				const winMsg = document.createElement('div');
 				winMsg.className = 'puzzle-win-msg';
 				winMsg.textContent = 'Puzzle completed!';
@@ -460,35 +839,73 @@ function renderDetailView(imgObj, idx) {
 				if (selectedCollectedIdx === null) return;
 				if (e.key.toLowerCase() === 'r') {
 					rotationState[selectedCollectedIdx] = ((rotationState[selectedCollectedIdx] || 0) + 1) % 4;
+					// Guardar el estado después de rotar
+					allImages[idx].rotationState = [...rotationState];
+					saveImages();
 					renderCollectedGrid();
 					checkCollectedWin();
 					return;
 				}
 
 				let dir = null;
-				if (e.key === 'ArrowUp') dir = -cols;
-				else if (e.key === 'ArrowDown') dir = cols;
+				if (e.key === 'ArrowUp') {
+					dir = -cols;
+					e.preventDefault();
+				}
+				else if (e.key === 'ArrowDown') {
+					dir = cols;
+					e.preventDefault();
+				}
 				else if (e.key === 'ArrowLeft') dir = -1;
 				else if (e.key === 'ArrowRight') dir = 1;
 
 				if (dir !== null) {
 					const targetIdx = selectedCollectedIdx + dir;
 					if (targetIdx >= 0 && targetIdx < totalPieces && isAdjacent(selectedCollectedIdx, targetIdx)) {
+						const selectedCell = grid.children[selectedCollectedIdx];
+						const targetCell = grid.children[targetIdx];
+						
 						if (collectedPuzzleState[targetIdx] !== null) {
 							// Intercambiar piezas
+							const selectedCanvas = selectedCell.querySelector('canvas');
+							const targetCanvas = targetCell.querySelector('canvas');
+							
+							// Remover temporalmente los canvas de sus celdas
+							selectedCell.removeChild(selectedCanvas);
+							targetCell.removeChild(targetCanvas);
+							
+							// Intercambiar los canvas
+							selectedCell.appendChild(targetCanvas);
+							targetCell.appendChild(selectedCanvas);
+							
+							// Actualizar estados
 							[collectedPuzzleState[targetIdx], collectedPuzzleState[selectedCollectedIdx]] = 
 							[collectedPuzzleState[selectedCollectedIdx], collectedPuzzleState[targetIdx]];
 							[rotationState[targetIdx], rotationState[selectedCollectedIdx]] = 
 							[rotationState[selectedCollectedIdx], rotationState[targetIdx]];
-							selectedCollectedIdx = targetIdx;
+							
 						} else {
+							// Mover canvas a la celda vacía
+							const selectedCanvas = selectedCell.querySelector('canvas');
+							targetCell.appendChild(selectedCanvas);
+							
+							// Actualizar estados
 							collectedPuzzleState[targetIdx] = collectedPuzzleState[selectedCollectedIdx];
 							rotationState[targetIdx] = rotationState[selectedCollectedIdx];
 							collectedPuzzleState[selectedCollectedIdx] = null;
 							rotationState[selectedCollectedIdx] = 0;
-							selectedCollectedIdx = targetIdx;
 						}
-						renderCollectedGrid();
+						
+						// Actualizar la selección visual
+						selectedCell.style.outline = '';
+						targetCell.style.outline = '3px solid #b2d900';
+						selectedCollectedIdx = targetIdx;
+						
+						// Guardar el estado después de mover
+						allImages[idx].puzzleState = [...collectedPuzzleState];
+						allImages[idx].rotationState = [...rotationState];
+						saveImages();
+						
 						checkCollectedWin();
 					}
 				}
