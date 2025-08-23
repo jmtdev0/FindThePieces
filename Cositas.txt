@@ -1,1 +1,9 @@
 Resolución, que no se corte, que haga el corte en función de las medidas
+Adaptar tamaño de imagen a la pantalla
+Imágenes con dimensiones raras
+Que los cuadrados del content-script sean lo que tengan que ser
+Que si coges una pieza se añada y tal en tiempo real. Y si borras una imagen o cmabias la frecuencia, pues igual
+Limitación de llamadas por IP al Worker
+Que solo se pueda subir a Instagram una vez cada puzzle en caso de descompletarlo y volver a hacerlo
+Pop-up de eliminación
+Que al abrir un puzle de 2x2 no esté resuelto ya xd

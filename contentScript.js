@@ -22,8 +22,10 @@
       // Buscar una imagen y pieza no recogida
       let candidates = [];
       puzzleImages.forEach((img, idx) => {
+        const size = img.gridSize || 3; // Usar tamaño guardado o 3x3 por compatibilidad
+        const totalPieces = size * size;
         const collected = Array.isArray(img.collectedPieces) ? img.collectedPieces : [];
-        const availablePieces = Array.from({length: 9}, (_, i) => i).filter(i => !collected.includes(i));
+        const availablePieces = Array.from({length: totalPieces}, (_, i) => i).filter(i => !collected.includes(i));
         if (availablePieces.length > 0) {
           candidates.push({img, idx, availablePieces});
         }
@@ -41,8 +43,9 @@
       const pieceIndex = chosen.availablePieces[Math.floor(Math.random() * chosen.availablePieces.length)];
       const img = chosen.img;
 
-      // Calcular dimensiones para 3x3 y mantener proporción
-      const rows = 3, cols = 3;
+      // Calcular dimensiones según el tamaño del grid
+      const size = img.gridSize || 3; // Usar tamaño guardado o 3x3 por compatibilidad
+      const rows = size, cols = size;
       const imgW = img.width || 1000;
       const imgH = img.height || 1000;
       const pieceW = imgW / cols;
@@ -69,10 +72,23 @@
   ctx.drawImage(imageEl, sx, sy, pieceW, pieceH, 0, 0, logicalW, logicalH);
         const pieceDataUrl = canvas.toDataURL();
 
-        // Posición aleatoria
+        // Posición aleatoria - mantener relación de aspecto de la pieza
         const margin = 40;
-        const imgWidth = 60;
-        const imgHeight = 60;
+        const maxSize = 60; // Tamaño máximo
+        const pieceAspect = pieceW / pieceH;
+        let imgWidth, imgHeight;
+        
+        // Calcular dimensiones manteniendo la relación de aspecto
+        if (pieceAspect > 1) {
+          // Pieza más ancha que alta
+          imgWidth = maxSize;
+          imgHeight = maxSize / pieceAspect;
+        } else {
+          // Pieza más alta que ancha (o cuadrada)
+          imgHeight = maxSize;
+          imgWidth = maxSize * pieceAspect;
+        }
+        
         const viewportW = window.innerWidth;
         const viewportH = window.innerHeight;
         const x = Math.floor(Math.random() * (viewportW - imgWidth - margin)) + margin/2;

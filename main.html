@@ -2,16 +2,44 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Find The Pieces - Puzzle</title>
+  <title>Find The Pieces - Gallery</title>
   <link rel="stylesheet" href="./main.css">
 </head>
 <body>
   <div id="uploadBlock">
     <h1>Find The Pieces 🧩</h1>
-    <h2>Upload images and solve the puzzle!</h2>
-    <label for="imageInput" class="choose-images-btn">Choose Images</label>
-    <input type="file" id="imageInput" multiple accept="image/*">
+    <h2>Upload images, retrieve the pieces and solve the puzzle!</h2>
+    <label class="choose-images-btn" id="chooseImagesBtn">Choose Images</label>
   </div>
+
+  <!-- Modal for image upload -->
+  <div id="uploadModal" class="modal">
+    <div class="modal-content">
+      <h3>Choose images to create puzzles</h3>
+      <div class="difficulty-selector">
+        <label for="puzzleDifficulty">Choose puzzle size:</label>
+        <select id="puzzleDifficulty" class="puzzle-select">
+          <option value="2">2 × 2 (Easy)</option>
+          <option value="3">3 × 3</option>
+          <option value="4">4 × 4</option>
+          <option value="5">5 × 5 (Medium)</option>
+          <option value="6">6 × 6</option>
+          <option value="7">7 × 7</option>
+          <option value="8">8 × 8 (Hard)</option>
+          <option value="9">9 × 9</option>
+          <option value="10">10 × 10 (Expert)</option>
+        </select>
+      </div>
+      <div class="upload-area">
+        <label for="imageInput" class="upload-label">
+          <span>📁 Select files</span>
+          <small>or drag them here</small>
+        </label>
+        <input type="file" id="imageInput" multiple accept="image/*">
+      </div>
+    </div>
+  </div>
+
   <div id="previewContainer"></div>
   <script src="main.js"></script>
 </body>

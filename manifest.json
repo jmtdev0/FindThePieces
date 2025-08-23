@@ -32,5 +32,11 @@
       },
       "description": "Open Find The Pieces extension page"
     }
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["sounds/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

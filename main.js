@@ -199,16 +199,29 @@ function renderPreviews() {
 				const viewportWidth = window.innerWidth;
 				const viewportHeight = window.innerHeight;
 				
-				// Calcular la posición preferida (a la derecha y abajo del cursor)
+				// Calcular posiciones posibles
 				let x = e.clientX + 20;
 				let y = e.clientY + 20;
 				
-				// Ajustar si se sale de la pantalla
+				// Ajustar horizontalmente si se sale de la pantalla
 				if (x + rect.width > viewportWidth) {
 					x = e.clientX - rect.width - 20;
 				}
+				
+				// Para la posición vertical, priorizar mostrar hacia abajo
+				// Solo mover hacia arriba si definitivamente no cabe abajo
 				if (y + rect.height > viewportHeight) {
-					y = e.clientY - rect.height - 20;
+					// Verificar si cabe mejor arriba
+					const spaceAbove = e.clientY - 20;
+					const spaceBelow = viewportHeight - (e.clientY + 20);
+					
+					if (spaceAbove > spaceBelow && spaceAbove >= rect.height) {
+						// Solo mover arriba si hay más espacio arriba Y cabe completamente
+						y = e.clientY - rect.height - 20;
+					} else {
+						// Mantener abajo pero ajustar para que quepa en pantalla
+						y = Math.max(0, viewportHeight - rect.height - 10);
+					}
 				}
 				
 				hoverPopup.style.left = x + 'px';
@@ -365,14 +378,7 @@ function renderDetailView(imgObj, idx) {
 	// Tamaño real de cada pieza en la imagen
 	const pieceW = imgObj.width / cols;
 	const pieceH = imgObj.height / rows;
-	// Log dimensions for debugging
-	console.debug('puzzle-piece-dimensions', {
-		pieceW,
-		pieceH,
-		cellW,
-		cellH,
-		dpr: window.devicePixelRatio || 1
-	});
+	
 	let rotationState = Array(totalPieces).fill(0);
 	if (Array.isArray(imgObj.rotationState) && imgObj.rotationState.length === totalPieces) {
 		rotationState = [...imgObj.rotationState];
@@ -435,13 +441,11 @@ function renderDetailView(imgObj, idx) {
 			title.style.color = imgObj.completed ? '#b2d900' : '#ff9100';
 			title.style.fontWeight = '600';
 			collectedWrap.appendChild(title);
-            console.log('Inicializando sistema de doble buffer');
             // Crear un canvas buffer fuera de pantalla para todo el grid
             const offscreenCanvas = document.createElement('canvas');
             const dpr = window.devicePixelRatio || 1;
             offscreenCanvas.style.display = 'none';
             document.body.appendChild(offscreenCanvas);
-            console.log('Canvas offscreen creado y añadido al DOM (oculto)');
 
 			const grid = document.createElement('div');
 			grid.style.display = 'grid';
@@ -483,16 +487,51 @@ function renderDetailView(imgObj, idx) {
 				// Usar el estado guardado si existe
 				collectedPuzzleState = [...imgObj.puzzleState];
 			} else {
-				// Inicializar con las piezas en orden secuencial
+				// Función para verificar si una disposición es la solución
+				const isSolved = (state, rotations) => {
+					for (let i = 0; i < totalPieces; i++) {
+						if (state[i] !== i || rotations[i] !== 0) {
+							return false;
+						}
+					}
+					return true;
+				};
+
+				// Función para mezclar array sin que quede en la posición original
+				const shuffleUntilDifferent = (arr) => {
+					let shuffled;
+					let attempts = 0;
+					do {
+						shuffled = [...arr];
+						// Fisher-Yates shuffle
+						for (let i = shuffled.length - 1; i > 0; i--) {
+							const j = Math.floor(Math.random() * (i + 1));
+							[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+						}
+						attempts++;
+					} while (isSolved(shuffled, Array(totalPieces).fill(0)) && attempts < 100);
+					return shuffled;
+				};
+
+				// Inicializar con las piezas mezcladas (no en la solución)
 				collectedPuzzleState = Array(totalPieces).fill(null);
-				collected.forEach((pieceIdx, i) => {
-					collectedPuzzleState[i] = pieceIdx;
-				});
+				
+				if (collected.length === totalPieces) {
+					// Si tenemos todas las piezas, las mezclamos para que no estén resueltas
+					const shuffledPieces = shuffleUntilDifferent(collected);
+					shuffledPieces.forEach((pieceIdx, i) => {
+						collectedPuzzleState[i] = pieceIdx;
+					});
+				} else {
+					// Si no tenemos todas las piezas, las colocamos secuencialmente
+					collected.forEach((pieceIdx, i) => {
+						collectedPuzzleState[i] = pieceIdx;
+					});
+				}
 			}
 
 			// Función para renderizar el grid de piezas coleccionadas
 			function renderCollectedGrid() {
-				console.log('Iniciando renderizado del grid completo');
 				grid.innerHTML = '';
 				for (let i = 0; i < totalPieces; i++) {
 					const cell = document.createElement('div');
@@ -517,7 +556,6 @@ function renderDetailView(imgObj, idx) {
                         canvas.style.borderRadius = '0';
 
                         // Usar el canvas fuera de pantalla para pre-renderizar
-                        console.log(`[Pieza ${i}] Configurando offscreenCanvas - dimensiones: ${canvas.width}x${canvas.height}`);
                         offscreenCanvas.width = canvas.width;
                         offscreenCanvas.height = canvas.height;
                         const offscreenCtx = offscreenCanvas.getContext('2d');
@@ -525,7 +563,6 @@ function renderDetailView(imgObj, idx) {
 
                         const imgThumb = new window.Image();
                         imgThumb.onload = function() {
-                            console.log(`[Pieza ${i}] Imagen cargada, preparando para dibujar`);
                             const col = pieceIdx % cols;
                             const row = Math.floor(pieceIdx / cols);
                             const srcW = imgThumb.naturalWidth || imgObj.width;
@@ -535,7 +572,6 @@ function renderDetailView(imgObj, idx) {
                             const sx = col * srcPieceW;
                             const sy = row * srcPieceH;
 
-                            console.log(`[Pieza ${i}] Dibujando en offscreenCanvas - Rotación: ${rotationState[i] * 90}°`);
                             // Renderizar en el canvas fuera de pantalla primero
                             offscreenCtx.save();
                             offscreenCtx.translate(cellW/2, cellH/2);
@@ -543,13 +579,10 @@ function renderDetailView(imgObj, idx) {
                             offscreenCtx.translate(-cellW/2, -cellH/2);
                             offscreenCtx.drawImage(imgThumb, sx, sy, srcPieceW, srcPieceH, 0, 0, cellW, cellH);
                             offscreenCtx.restore();
-                            console.log(`[Pieza ${i}] Dibujo en offscreenCanvas completado`);
 
-                            console.log(`[Pieza ${i}] Copiando de offscreenCanvas a canvas visible`);
                             // Copiar al canvas visible de una sola vez
                             const ctx = canvas.getContext('2d');
                             ctx.drawImage(offscreenCanvas, 0, 0);
-                            console.log(`[Pieza ${i}] Canvas visible actualizado`);
                         };
                         imgThumb.src = imgObj.src;
                         cell.appendChild(canvas);
@@ -610,6 +643,12 @@ function renderDetailView(imgObj, idx) {
 
 			// Función para mostrar popup de felicitación
 			function showCongratulationsPopup() {
+				// Eliminar popup existente si existe
+				const existingPopup = document.getElementById('congratulations-popup');
+				if (existingPopup) {
+					existingPopup.remove();
+				}
+				
 				const popup = document.createElement('div');
 				popup.id = 'congratulations-popup';
 				popup.style.cssText = `
@@ -753,16 +792,25 @@ function renderDetailView(imgObj, idx) {
 						const result = await response.json();
 						console.log('Worker response body:', result);
 
-						if (response.ok && result.status_code === 200) {
-							statusDiv.innerHTML = `
-								<div style="color: #4CAF50;">✅ ¡Imagen subida exitosamente!</div>
-								<a href="${result.image.url}" target="_blank" style="color: #lightblue; text-decoration: underline; font-size: 12px;">Ver imagen</a>
-							`;
-							
-							// Esperar un poco y cerrar
-							setTimeout(closePopup, 3000);
+						// Verificar si la respuesta del Worker es exitosa
+						if (response.ok) {
+							// Verificar si Freeimage.host respondió exitosamente
+							if (result.status_code === 200 && result.image && result.image.url) {
+								statusDiv.innerHTML = `
+									<div style="color: #4CAF50;">✅ ¡Imagen subida exitosamente!</div>
+									<a href="${result.image.url}" target="_blank" style="color: #lightblue; text-decoration: underline; font-size: 12px;">Ver imagen</a>
+								`;
+								
+								// Esperar un poco y cerrar
+								setTimeout(closePopup, 3000);
+							} else {
+								// Error de Freeimage.host
+								const errorMsg = result.error?.message || result.error || 'Error en el servicio de imágenes';
+								throw new Error(errorMsg);
+							}
 						} else {
-							throw new Error(result.error || 'Error al subir la imagen');
+							// Error del Worker de CloudFlare
+							throw new Error(result.error || `Error del servidor (${response.status})`);
 						}
 
 					} catch (error) {
@@ -786,10 +834,15 @@ function renderDetailView(imgObj, idx) {
 						
 						const img = new Image();
 						img.onload = () => {
+							// Rellenar con fondo blanco para JPG (ya que JPG no soporta transparencia)
+							ctx.fillStyle = '#ffffff';
+							ctx.fillRect(0, 0, canvas.width, canvas.height);
+							
+							// Dibujar la imagen encima
 							ctx.drawImage(img, 0, 0);
 							
-							// Convertir a base64 (sin el prefijo data:image/png;base64,)
-							const base64 = canvas.toDataURL('image/png').split(',')[1];
+							// Convertir a JPG con calidad 90 (sin el prefijo data:image/jpeg;base64,)
+							const base64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
 							resolve(base64);
 						};
 						img.src = imgObj.src;
@@ -809,6 +862,25 @@ function renderDetailView(imgObj, idx) {
 				document.addEventListener('keydown', handleEscape);
 			}
 
+			// Función para reproducir sonido de completado
+			function playCompletionSound() {
+				try {
+					const audio = new Audio();
+					audio.src = chrome.runtime.getURL('sounds/completion.mp3');
+					audio.volume = 0.5; // Volumen moderado
+					audio.play().catch(err => {
+						console.log('No se pudo reproducir el sonido de completado:', err);
+						// Intentar con formato alternativo
+						audio.src = chrome.runtime.getURL('sounds/completion.wav');
+						audio.play().catch(err2 => {
+							console.log('No se pudo reproducir sonido alternativo:', err2);
+						});
+					});
+				} catch (error) {
+					console.log('Error al cargar sonido de completado:', error);
+				}
+			}
+
 			// Función para verificar si se ha completado el puzzle en el grid de piezas coleccionadas
 			function checkCollectedWin() {
 				for (let i = 0; i < totalPieces; i++) {
@@ -825,13 +897,20 @@ function renderDetailView(imgObj, idx) {
 				}
 				saveImages();
 				
+				// Reproducir sonido de completado
+				playCompletionSound();
+				
 				// Mostrar popup de felicitación
 				showCongratulationsPopup();
 				
-				const winMsg = document.createElement('div');
-				winMsg.className = 'puzzle-win-msg';
-				winMsg.textContent = 'Puzzle completed!';
-				collectedWrap.insertBefore(winMsg, grid);
+				// Verificar si ya existe un mensaje de puzzle completado
+				const existingWinMsg = collectedWrap.querySelector('.puzzle-win-msg');
+				if (!existingWinMsg) {
+					const winMsg = document.createElement('div');
+					winMsg.className = 'puzzle-win-msg';
+					winMsg.textContent = 'Puzzle completed!';
+					collectedWrap.insertBefore(winMsg, grid);
+				}
 			}
 
 			// Manejador de teclas para el grid de piezas coleccionadas
