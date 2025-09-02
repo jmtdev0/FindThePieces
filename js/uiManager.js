@@ -419,14 +419,9 @@ class UIManager {
             if (contentScriptSwitch) {
                 contentScriptSwitch.style.display = 'flex';
             }
-            // Cleanup any active drag ghost if present
-            try {
-                if (window.currentPuzzleDragGhost && window.currentPuzzleDragGhost.parentNode) {
-                    window.currentPuzzleDragGhost.parentNode.removeChild(window.currentPuzzleDragGhost);
-                }
-                window.currentPuzzleDragGhost = null;
-            } catch (cleanupErr) {
-                console.warn('Error cleaning up puzzle drag ghost:', cleanupErr);
+            // Cleanup any active drag state
+            if (window.puzzleDragState) {
+                window.puzzleDragState = null;
             }
 
             window.puzzleManager.cleanup();
@@ -617,14 +612,11 @@ class UIManager {
         grid.style.width = gridWidth + 'px';
         grid.style.height = gridHeight + 'px';
         
-        // Estado para drag & drop y teclado
+        // Estado para selección de teclado
     let selectedCell = null;
     let selectedIdx = null;
     let puzzleState = [];
     let keyboardHandler = null;
-    // Drag state to avoid stray clicks causing extra swaps
-    let isDragging = false;
-    let suppressClicksUntil = 0;
         
         // Inicializar estado del puzzle
         if (imgObj.puzzleState && imgObj.puzzleState.length === totalPieces) {
@@ -710,13 +702,6 @@ class UIManager {
                 
         // Añadir funcionalidad de click (solo selección para movimiento con teclado)
                 cell.addEventListener('click', (ev) => {
-                    // Ignore clicks fired right after a drag-drop
-                    if (isDragging || Date.now() < suppressClicksUntil) {
-                        puzzleDebug('Click suprimido tras arrastre/cooldown', { now: Date.now(), suppressClicksUntil });
-                        ev.preventDefault();
-                        ev.stopPropagation();
-                        return;
-                    }
                     const clickedPiece = puzzleState[i];
                     if (clickedPiece !== null) {
                         puzzleDebug(`Click en pieza ${clickedPiece} (celda ${i})${selectedCell ? ' con selección previa' : ''}`, { cellIndex: i, pieceIndex: clickedPiece, hadSelection: !!selectedCell });
@@ -753,318 +738,29 @@ class UIManager {
                     }
                 });
 
-                // Drag & drop: start on mousedown without prior selection; on drop over another cell, swap or move
-                pieceImg.addEventListener('mousedown', (ev) => {
-                    if (ev.button !== 0) return; // left button only
-                    
+                
+                // Simple drag & drop implementation using HTML5 drag API
+                pieceImg.draggable = true;
+                
+                pieceImg.addEventListener('dragstart', (ev) => {
                     const fromIdx = parseInt(cell.dataset.index);
                     const fromPiece = puzzleState[fromIdx];
-                    puzzleDebug(`Iniciar arrastre de pieza ${fromPiece} (desde celda ${fromIdx})`, { fromIdx, pieceIndex: fromPiece });
-
-                    try {
-                        let didDrag = false;
-                        let hoverCell = null; // candidate drop cell to highlight
-                        let hoverIdx = null;
-                        let cellRects = null; // precomputed rects of grid cells
-                        let gridRect = null;
-                        const startX = ev.clientX;
-                        const startY = ev.clientY;
-                        const startTime = Date.now();
-                        let ghost = null;
-                        let dragStarted = false;
-
-                        const ensureGhost = () => {
-                            if (didDrag) return;
-                            didDrag = true;
-                            dragStarted = true;
-                            isDragging = true;
-                            
-                            // Prevent the click event from firing since we're starting a drag
-                            ev.preventDefault();
-                            
-                            // Create drag ghost from the canvas content
-                            const srcCanvas = pieceImg;
-                            ghost = document.createElement('canvas');
-                            ghost.width = srcCanvas.width;
-                            ghost.height = srcCanvas.height;
-                            const gctx = ghost.getContext('2d');
-                            try { gctx.drawImage(srcCanvas, 0, 0); } catch (err) { console.warn('Drag ghost draw fail:', err); }
-                            ghost.style.position = 'fixed';
-                            ghost.style.pointerEvents = 'none';
-                            ghost.style.opacity = '0.95';
-                            ghost.style.zIndex = 20000;
-                            const rect = pieceImg.getBoundingClientRect();
-                            ghost.style.width = rect.width + 'px';
-                            ghost.style.height = rect.height + 'px';
-                            ghost.style.boxShadow = '0 8px 20px rgba(0,0,0,0.18)';
-                            ghost.style.borderRadius = '4px';
-                            document.body.appendChild(ghost);
-                            window.currentPuzzleDragGhost = ghost;
-                            ghost.style.left = (startX - ghost.offsetWidth / 2) + 'px';
-                            ghost.style.top = (startY - ghost.offsetHeight / 2) + 'px';
-                            puzzleDebug(`Comienza arrastre de pieza ${fromPiece} (celda ${fromIdx}) en (${startX}, ${startY})`, { fromIdx, pieceIndex: fromPiece, startX, startY });
-
-                            // Precompute cell rectangles for robust hit testing
-                            try {
-                                gridRect = grid.getBoundingClientRect();
-                                cellRects = Array.from(grid.children).map(el => {
-                                    const rect = el.getBoundingClientRect();
-                                    return {
-                                        el,
-                                        idx: parseInt(el.dataset.index),
-                                        rect: rect,
-                                        cx: rect.left + rect.width / 2,
-                                        cy: rect.top + rect.height / 2
-                                    };
-                                });
-                            } catch (_) { cellRects = null; }
-                        };
-
-                        const pickCell = (x, y) => {
-                            if (!cellRects || !gridRect) {
-                                puzzleDebug('pickCell: Sin cellRects o gridRect', { hasCellRects: !!cellRects, hasGridRect: !!gridRect });
-                                return { el: null, idx: null };
-                            }
-                            
-                            // If pointer within grid bounds, prefer containment
-                            if (x >= gridRect.left && x <= gridRect.right && y >= gridRect.top && y <= gridRect.bottom) {
-                                // First try exact containment
-                                for (const c of cellRects) {
-                                    const r = c.rect;
-                                    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
-                                        puzzleDebug('pickCell: Encontrada por contencion exacta', { idx: c.idx, x, y, rect: r });
-                                        return { el: c.el, idx: c.idx };
-                                    }
-                                }
-                                // On borders between cells, choose nearest center
-                                let best = null, bestD2 = Infinity;
-                                for (const c of cellRects) {
-                                    const dx = x - c.cx, dy = y - c.cy;
-                                    const d2 = dx*dx + dy*dy;
-                                    if (d2 < bestD2) { bestD2 = d2; best = c; }
-                                }
-                                if (best) {
-                                    puzzleDebug('pickCell: Encontrada por distancia', { idx: best.idx, x, y, distance: Math.sqrt(bestD2) });
-                                }
-                                return best ? { el: best.el, idx: best.idx } : { el: null, idx: null };
-                            }
-                            
-                            puzzleDebug('pickCell: Fuera de los límites del grid', { x, y, gridRect });
-                            return { el: null, idx: null };
-                        };
-
-                        const onMove = (e) => {
-                            const dx = Math.abs(e.clientX - startX);
-                            const dy = Math.abs(e.clientY - startY);
-                            const timeSinceStart = Date.now() - startTime;
-                            
-                            // Require both distance (8px) AND time (100ms) OR significant distance (15px) to start drag
-                            const shouldStartDrag = !didDrag && (
-                                (dx > 8 || dy > 8) && timeSinceStart > 100 ||
-                                dx > 15 || dy > 15
-                            );
-                            
-                            if (shouldStartDrag) {
-                                ensureGhost();
-                            }
-                            if (!didDrag) return;
-                            if (!window.currentPuzzleDragGhost) return;
-                            window.currentPuzzleDragGhost.style.left = (e.clientX - window.currentPuzzleDragGhost.offsetWidth / 2) + 'px';
-                            window.currentPuzzleDragGhost.style.top = (e.clientY - window.currentPuzzleDragGhost.offsetHeight / 2) + 'px';
-
-                            // Determine and highlight current candidate drop cell
-                            try {
-                                const { el: validCandidate, idx: overIdx } = pickCell(e.clientX, e.clientY);
-                                if (hoverCell !== validCandidate) {
-                                    if (hoverCell) { hoverCell.style.outline = ''; hoverCell.style.outlineOffset = ''; }
-                                    if (validCandidate) { validCandidate.style.outline = '3px solid #ff9100'; validCandidate.style.outlineOffset = '-3px'; }
-                                    hoverCell = validCandidate;
-                                    hoverIdx = overIdx;
-                                    if (overIdx !== null) {
-                                        const overPiece = puzzleState[overIdx];
-                                        if (overPiece !== null) {
-                                            puzzleDebug(`Arrastrando sobre pieza ${overPiece} (celda ${overIdx}) en (${e.clientX}, ${e.clientY})`, { fromIdx, overIdx, overPiece, x: e.clientX, y: e.clientY });
-                                        } else {
-                                            puzzleDebug(`Arrastrando sobre celda vacía ${overIdx} en (${e.clientX}, ${e.clientY})`, { fromIdx, overIdx, x: e.clientX, y: e.clientY });
-                                        }
-                                    } else {
-                                        puzzleDebug(`Arrastrando fuera de celdas (${e.clientX}, ${e.clientY})`, { fromIdx, x: e.clientX, y: e.clientY });
-                                    }
-                                }
-                            } catch (hoverErr) { 
-                                puzzleDebug('Error en detección de hover cell', { error: hoverErr.message, x: e.clientX, y: e.clientY });
-                            }
-                        };
-
-                        const onUp = (e) => {
-                            document.removeEventListener('mousemove', onMove);
-                            document.removeEventListener('mouseup', onUp);
-                            if (!didDrag) {
-                                // Simple click; let click handler manage selection
-                                puzzleDebug(`MouseUp sin arrastre (click) en pieza ${fromPiece} (celda ${fromIdx})`, { fromIdx, pieceIndex: fromPiece });
-                                return;
-                            }
-                            try { if (hoverCell) { hoverCell.style.outline = ''; hoverCell.style.outlineOffset = ''; } } catch (_) {}
-                            if (window.currentPuzzleDragGhost && window.currentPuzzleDragGhost.parentNode) {
-                                window.currentPuzzleDragGhost.parentNode.removeChild(window.currentPuzzleDragGhost);
-                            }
-                            window.currentPuzzleDragGhost = null;
-                            isDragging = false;
-                            
-                            // Only suppress clicks if we actually dragged
-                            if (dragStarted) {
-                                suppressClicksUntil = Date.now() + 500; // Longer suppression for actual drags
-                            }
-                            
-                            puzzleDebug(`Fin de arrastre de pieza ${fromPiece} (celda ${fromIdx}) en (${e.clientX}, ${e.clientY})`, { fromIdx, pieceIndex: fromPiece, endX: e.clientX, endY: e.clientY, actuallyDragged: dragStarted, hoverCell: !!hoverCell, hoverIdx });
-
-                            // Determine drop target cell within this grid using robust hit testing
-                            let dropCell = (hoverCell && hoverCell.parentElement === grid) ? hoverCell : null;
-                            let toIdx = (hoverIdx !== null) ? hoverIdx : null;
-                            
-                            // Double-check with pickCell if we don't have a clear target
-                            if (!dropCell || toIdx === null) {
-                                const picked = pickCell(e.clientX, e.clientY);
-                                dropCell = picked.el;
-                                toIdx = picked.idx;
-                            }
-                            
-                            // Additional fallback: use elementFromPoint if pickCell failed
-                            if (!dropCell || toIdx === null) {
-                                try {
-                                    // Refresh cellRects in case positions changed during drag
-                                    gridRect = grid.getBoundingClientRect();
-                                    cellRects = Array.from(grid.children).map(el => {
-                                        const rect = el.getBoundingClientRect();
-                                        return {
-                                            el,
-                                            idx: parseInt(el.dataset.index),
-                                            rect: rect,
-                                            cx: rect.left + rect.width / 2,
-                                            cy: rect.top + rect.height / 2
-                                        };
-                                    });
-                                    
-                                    // Try pickCell again with refreshed data
-                                    const picked = pickCell(e.clientX, e.clientY);
-                                    if (picked.el && picked.idx !== null) {
-                                        dropCell = picked.el;
-                                        toIdx = picked.idx;
-                                        puzzleDebug('Destino encontrado tras refrescar cellRects', { toIdx });
-                                    } else {
-                                        // Final fallback: elementFromPoint
-                                        const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
-                                        if (elementBelow) {
-                                            // Check if it's a grid cell or find the closest grid cell
-                                            let candidateCell = elementBelow;
-                                            if (!candidateCell.classList || !candidateCell.classList.contains('puzzle-cell')) {
-                                                candidateCell = elementBelow.closest('.puzzle-cell');
-                                            }
-                                            if (candidateCell && candidateCell.parentElement === grid && candidateCell.dataset.index) {
-                                                dropCell = candidateCell;
-                                                toIdx = parseInt(candidateCell.dataset.index);
-                                                puzzleDebug('Destino encontrado con elementFromPoint fallback', { toIdx, cellElement: !!candidateCell });
-                                            }
-                                        }
-                                    }
-                                } catch (fallbackErr) {
-                                    puzzleDebug('Error en fallback elementFromPoint', fallbackErr);
-                                }
-                            }
-                            
-                            // Validate the drop target
-                            if (!dropCell || dropCell.parentElement !== grid || toIdx === null || isNaN(toIdx)) {
-                                puzzleDebug('Soltar fuera del grid o destino inválido', { fromIdx, x: e.clientX, y: e.clientY, dropCell: !!dropCell, toIdx, gridChildren: grid.children.length });
-                                return; // dropped outside grid or on another grid
-                            }
-                            
-                            toIdx = parseInt(toIdx);
-                            if (toIdx === fromIdx) {
-                                puzzleDebug('Soltar sobre la misma celda (sin cambios)', { fromIdx, toIdx });
-                                return;
-                            }
-
-                            const prevCompletedDrag = !!imgObj.completed;
-                            // Resolve the current index of the dragged piece to guarantee it participates in the swap/move
-                            const draggedPiece = fromPiece; // captured at mousedown
-                            const currentFromIdx = puzzleState.indexOf(draggedPiece);
-                            if (currentFromIdx === -1) {
-                                puzzleDebug('Advertencia: pieza arrastrada ya no está en puzzleState; se cancela drop', { draggedPiece });
-                                return;
-                            }
-                            if (toIdx === currentFromIdx) {
-                                puzzleDebug('Soltar sobre la misma celda (sin cambios)', { currentFromIdx, toIdx });
-                                return;
-                            }
-                            const targetHadPiece = puzzleState[toIdx] !== null;
-                            const toPieceBefore = puzzleState[toIdx];
-                            const fromPieceBefore = puzzleState[currentFromIdx];
-                            if (currentFromIdx !== fromIdx) {
-                                puzzleDebug('Nota: índice origen cambió durante arrastre', { initialFromIdx: fromIdx, currentFromIdx, draggedPiece });
-                            }
-
-                            // Swap if target has a piece; otherwise move to empty
-                            if (puzzleState[toIdx] !== null) {
-                                const tmp = puzzleState[toIdx];
-                                puzzleState[toIdx] = puzzleState[currentFromIdx];
-                                puzzleState[currentFromIdx] = tmp;
-                                puzzleDebug(`Intercambio (arrastre): pieza ${fromPieceBefore} (celda ${currentFromIdx}) ↔ pieza ${toPieceBefore} (celda ${toIdx})`, { fromIdx: currentFromIdx, toIdx, fromPiece: fromPieceBefore, toPiece: toPieceBefore });
-                            } else {
-                                puzzleState[toIdx] = puzzleState[currentFromIdx];
-                                puzzleState[currentFromIdx] = null;
-                                puzzleDebug(`Mover (arrastre): pieza ${fromPieceBefore} de celda ${currentFromIdx} a celda ${toIdx} (vacía)`, { fromIdx: currentFromIdx, toIdx, pieceIndex: fromPieceBefore });
-                            }
-
-                            // Check completion and persist
-                            const isCompletedNow = this.checkPuzzleCompletion(puzzleState, totalPieces);
-                            imgObj.puzzleState = [...puzzleState];
-                            imgObj.completed = !!isCompletedNow;
-                            if (imgObj.completed && !imgObj.completedAt) {
-                                imgObj.completedAt = new Date().toISOString();
-                            }
-                            if (window.findThePiecesApp) {
-                                window.findThePiecesApp.updateImageSilent(idx, {
-                                    puzzleState: puzzleState,
-                                    completed: imgObj.completed,
-                                    completedAt: imgObj.completedAt
-                                });
-                                puzzleDebug(`Estado persistido tras arrastre. ¿Completado?: ${imgObj.completed ? 'sí' : 'no'}`, { completed: imgObj.completed });
-                            }
-
-                            if (prevCompletedDrag && !imgObj.completed) {
-                                try {
-                                    const newPuzzleData = window.puzzleManager && window.puzzleManager.initializePuzzle ? window.puzzleManager.initializePuzzle(imgObj, idx) : { rows: rows, cols: cols, totalPieces: totalPieces };
-                                    this.renderDetailView(imgObj, idx, newPuzzleData);
-                                    return;
-                                } catch (reErr) {
-                                    console.error('Error re-rendering after drag un-complete:', reErr);
-                                }
-                            }
-
-                            if (isCompletedNow) {
-                                setTimeout(() => {
-                                    grid.style.animation = 'pulse 0.5s ease-in-out 3';
-                                    grid.style.boxShadow = '0 0 20px #b2d900';
-                                    if (keyboardHandler) { document.removeEventListener('keydown', keyboardHandler); }
-                                    this.playCompletionSound();
-                                    this.showCongratulationsPopup(imgObj, idx);
-                                    puzzleDebug('Puzzle completado por arrastre');
-                                    try {
-                                        const newPuzzleData = window.puzzleManager && window.puzzleManager.initializePuzzle ? window.puzzleManager.initializePuzzle(imgObj, idx) : { rows: rows, cols: cols, totalPieces: totalPieces };
-                                        this.renderDetailView(imgObj, idx, newPuzzleData);
-                                    } catch (reErr) { console.error('Error re-rendering detail after drag completion:', reErr); }
-                                }, 200);
-                            }
-
-                            // Update visuals for the two affected cells (safe re-render)
-                            this.updatePuzzleCells(grid, puzzleState, imgObj, rows, cols, currentFromIdx, toIdx);
-                        };
-
-                        document.addEventListener('mousemove', onMove);
-                        document.addEventListener('mouseup', onUp);
-                    } catch (err) {
-                        console.error('Error during drag & drop:', err);
-                    }
+                    puzzleDebug(`Iniciar arrastre: pieza ${fromPiece} desde celda ${fromIdx}`);
+                    
+                    // Store drag data
+                    ev.dataTransfer.setData('text/plain', JSON.stringify({
+                        fromIdx: fromIdx,
+                        fromPiece: fromPiece
+                    }));
+                    ev.dataTransfer.effectAllowed = 'move';
+                    
+                    // Add visual feedback
+                    cell.style.opacity = '0.5';
+                });
+                
+                pieceImg.addEventListener('dragend', (ev) => {
+                    // Remove visual feedback
+                    cell.style.opacity = '1';
                 });
             } else {
                 // Mostrar placeholder para pieza faltante o celda vacía
@@ -1072,16 +768,122 @@ class UIManager {
                     cell.style.background = '#f5f5f5';
                     cell.style.cursor = 'pointer';
                     
-                    // Clicks on empty cells do nothing (movement via drag or keyboard only)
+                    // Empty cells don't respond to clicks but can accept drops
                     cell.addEventListener('click', (ev) => {
-                        if (isDragging || Date.now() < suppressClicksUntil) {
-                            ev.preventDefault();
-                            ev.stopPropagation();
-                        }
-                        // Intentionally no action on empty cell click
+                        // No action on empty cell click
                     });
                 }
             }
+            
+            // Add drop handlers to all cells (both empty and with pieces)
+            cell.addEventListener('dragover', (ev) => {
+                ev.preventDefault(); // Allow drop
+                cell.style.backgroundColor = '#e8f5e8'; // Visual feedback
+            });
+            
+            cell.addEventListener('dragleave', (ev) => {
+                // Reset background when leaving
+                if (puzzleState[i] === null) {
+                    cell.style.backgroundColor = '#f5f5f5';
+                } else {
+                    cell.style.backgroundColor = '#f0f8ff';
+                }
+            });
+            
+            cell.addEventListener('drop', (ev) => {
+                ev.preventDefault();
+                
+                // Reset background
+                if (puzzleState[i] === null) {
+                    cell.style.backgroundColor = '#f5f5f5';
+                } else {
+                    cell.style.backgroundColor = '#f0f8ff';
+                }
+                
+                // Get drag data
+                const dragData = JSON.parse(ev.dataTransfer.getData('text/plain'));
+                const fromIdx = dragData.fromIdx;
+                const fromPiece = dragData.fromPiece;
+                const toIdx = i;
+                
+                puzzleDebug(`Drop: pieza ${fromPiece} desde celda ${fromIdx} a celda ${toIdx}`);
+                
+                // Don't drop on same cell
+                if (fromIdx === toIdx) {
+                    puzzleDebug('Drop en la misma celda - sin cambios');
+                    return;
+                }
+                
+                // Perform the swap or move
+                const prevCompleted = !!imgObj.completed;
+                
+                if (puzzleState[toIdx] !== null) {
+                    // Swap pieces
+                    const toPiece = puzzleState[toIdx];
+                    puzzleState[toIdx] = fromPiece;
+                    puzzleState[fromIdx] = toPiece;
+                    puzzleDebug(`Intercambio: pieza ${fromPiece} ↔ pieza ${toPiece}`);
+                } else {
+                    // Move to empty cell
+                    puzzleState[toIdx] = fromPiece;
+                    puzzleState[fromIdx] = null;
+                    puzzleDebug(`Mover: pieza ${fromPiece} a celda vacía ${toIdx}`);
+                }
+                
+                // Check completion and persist
+                const isCompletedNow = this.checkPuzzleCompletion(puzzleState, totalPieces);
+                imgObj.puzzleState = [...puzzleState];
+                imgObj.completed = !!isCompletedNow;
+                if (imgObj.completed && !imgObj.completedAt) {
+                    imgObj.completedAt = new Date().toISOString();
+                }
+                
+                if (window.findThePiecesApp) {
+                    window.findThePiecesApp.updateImageSilent(idx, {
+                        puzzleState: puzzleState,
+                        completed: imgObj.completed,
+                        completedAt: imgObj.completedAt
+                    });
+                    puzzleDebug(`Estado persistido. ¿Completado?: ${imgObj.completed ? 'sí' : 'no'}`);
+                }
+                
+                // Handle completion
+                if (prevCompleted && !imgObj.completed) {
+                    try {
+                        const newPuzzleData = window.puzzleManager && window.puzzleManager.initializePuzzle 
+                            ? window.puzzleManager.initializePuzzle(imgObj, idx) 
+                            : { rows: rows, cols: cols, totalPieces: totalPieces };
+                        this.renderDetailView(imgObj, idx, newPuzzleData);
+                        return;
+                    } catch (reErr) {
+                        console.error('Error re-rendering after un-complete:', reErr);
+                    }
+                }
+                
+                if (isCompletedNow) {
+                    setTimeout(() => {
+                        grid.style.animation = 'pulse 0.5s ease-in-out 3';
+                        grid.style.boxShadow = '0 0 20px #b2d900';
+                        if (keyboardHandler) { 
+                            document.removeEventListener('keydown', keyboardHandler); 
+                        }
+                        this.playCompletionSound();
+                        this.showCongratulationsPopup(imgObj, idx);
+                        puzzleDebug('Puzzle completado por drag & drop');
+                        try {
+                            const newPuzzleData = window.puzzleManager && window.puzzleManager.initializePuzzle 
+                                ? window.puzzleManager.initializePuzzle(imgObj, idx) 
+                                : { rows: rows, cols: cols, totalPieces: totalPieces };
+                            this.renderDetailView(imgObj, idx, newPuzzleData);
+                        } catch (reErr) { 
+                            console.error('Error re-rendering after completion:', reErr); 
+                        }
+                    }, 200);
+                }
+                
+                // Update visuals for affected cells
+                this.updatePuzzleCells(grid, puzzleState, imgObj, rows, cols, fromIdx, toIdx);
+            });
             
             grid.appendChild(cell);
         }
@@ -1092,11 +894,6 @@ class UIManager {
         
         // Manejador de teclado para el puzzle
     keyboardHandler = (e) => {
-            // No permitir movimientos de teclado durante un arrastre activo
-            if (isDragging) {
-                puzzleDebug('Teclado ignorado: arrastre en curso');
-                return;
-            }
             // Solo procesar si hay una celda seleccionada
             if (selectedIdx === null) return;
             
