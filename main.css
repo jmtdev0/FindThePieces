@@ -39,6 +39,17 @@ body {
   z-index: 60; /* overlay when expanded */
 }
 
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
 /* Expanded on hover or when any control inside is focused */
 #uploadBlock:hover, #uploadBlock:focus-within {
   height: var(--upload-expanded-height);
@@ -208,14 +219,14 @@ body {
 /* Grid de previsualización adaptable */
 #previewContainer {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 32px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); /* Reducido de 320px a 280px */
+  gap: 24px; /* Reducido de 32px a 24px */
   /* Add top padding so content isn't hidden behind the collapsed upload block */
-  padding: 32px;
-  padding-top: calc(32px + var(--upload-collapsed-height));
+  padding: 16px 32px 32px 16px; /* Menos padding izquierdo */
+  padding-top: calc(16px + var(--upload-collapsed-height));
   width: 100%;
-  max-width: 1440px;
-  margin: 0 auto;
+  max-width: 1535px;
+  margin: 20px 50px;
 }
 
 h1, h2 {
@@ -264,12 +275,14 @@ label[for="imageInput"]:hover, .choose-images-btn:hover {
   display: flex;
   flex-direction: column;
   background: #121417;
-  border-radius: 18px;
+  border-radius: 15px; /* Reducido de 18px a 15px */
   box-shadow: 0 2px 12px rgba(0,0,0,0.7);
-  padding: 18px;
+  padding: 14px; /* Reducido de 18px a 14px */
   height: 100%;
+  width: 320px;
   box-sizing: border-box;
   transition: transform 0.2s;
+  cursor: pointer;
 }
 
 .preview-wrapper:hover {
@@ -278,27 +291,36 @@ label[for="imageInput"]:hover, .choose-images-btn:hover {
 }
 
 .preview-image {
-  width: 100%;
-  height: 200px;
-  object-fit: contain;
-  border-radius: 12px;
+  width: fit-content;
+  align-self: center;
+  max-width: 100%;
+  height: 160px; /* Reducido de 200px a 160px */
+  object-fit: contain; /* Volvemos a contain para mantener proporción sin recortar */
+  border-radius: 10px; /* Reducido de 12px a 10px */
+  border: 2px solid #ff9100; /* Borde naranja */
   box-shadow: 0 2px 8px rgba(0,0,0,0.7);
-  margin-bottom: 16px;
+  margin-bottom: 12px; /* Reducido de 16px a 12px */
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.preview-image:hover {
+  border-color: #ffb74d; /* Borde más claro en hover */
 }
 
 .preview-side {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px; /* Reducido de 12px a 10px */
   margin-top: auto;
-  padding-top: 16px;
+  padding-top: 12px; /* Reducido de 16px a 12px */
   border-top: 1px solid rgba(255,145,0,0.08);
 }
 
 .preview-info {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px; /* Reducido de 6px a 5px */
   flex: 1;
 }
 
@@ -472,3 +494,283 @@ label[for="imageInput"]:hover, .choose-images-btn:hover {
 /* Add spacing for title and subtitle when wrapping */
 #uploadBlock > h1 { margin: 8px 12px 4px 12px; }
 #uploadBlock > h2 { margin: 4px 12px 8px 12px; }
+
+/* Estilos para input range (frequency slider) */
+.freq-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: #333;
+  outline: none;
+  margin: 8px 0;
+}
+
+.freq-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ff9100;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.freq-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ff9100;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.freq-slider::-webkit-slider-track {
+  background: linear-gradient(to right, #ff9100 0%, #ffb74d 100%);
+  height: 6px;
+  border-radius: 3px;
+}
+
+.freq-slider::-moz-range-track {
+  background: linear-gradient(to right, #ff9100 0%, #ffb74d 100%);
+  height: 6px;
+  border-radius: 3px;
+  border: none;
+}
+
+.frequency-control label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.freq-value {
+  color: #ff9100;
+  font-weight: bold;
+  text-align: center;
+  font-size: 12px;
+  min-width: 80px;
+  display: inline-block;
+}
+
+/* Botón de eliminar imagen */
+.delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(220, 53, 69, 0.9);
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+  cursor: pointer;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.preview-wrapper {
+  position: relative; /* Para posicionar el botón de eliminar */
+}
+
+.preview-wrapper:hover .delete-btn {
+  opacity: 1;
+}
+
+.delete-btn:hover {
+  background: rgba(220, 53, 69, 1);
+  transform: scale(1.1);
+}
+
+/* Modal de confirmación de eliminación */
+.delete-modal .modal-content {
+  max-width: 400px;
+  text-align: center;
+}
+
+.delete-confirmation {
+  background: linear-gradient(135deg, #2a1a1a 0%, #1a1414 100%);
+  border: 2px solid #dc3545;
+}
+
+.delete-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.delete-icon {
+  font-size: 24px;
+}
+
+.delete-header h3 {
+  color: #dc3545;
+  margin: 0;
+  font-size: 18px;
+}
+
+.delete-message {
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.delete-message p {
+  margin: 8px 0;
+  line-height: 1.4;
+}
+
+.progress-warning {
+  color: #ff9100;
+  font-weight: bold;
+}
+
+.warning-text {
+  color: #dc3545;
+  font-style: italic;
+  font-size: 14px;
+}
+
+.delete-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.cancel-btn, .confirm-delete-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 80px;
+}
+
+.cancel-btn {
+  background: #6c757d;
+  color: white;
+}
+
+.cancel-btn:hover {
+  background: #5a6268;
+}
+
+.confirm-delete-btn {
+  background: #dc3545;
+  color: white;
+}
+
+.confirm-delete-btn:hover {
+  background: #c82333;
+}
+
+/* Animación para puzzle completado */
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+/* Animación para fadeOut de piezas recogidas */
+@keyframes fadeOut {
+    0% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+    100% { opacity: 0; transform: scale(0.5); }
+}
+
+/* Placeholder claro para textarea de caption personalizado */
+#custom-caption::placeholder {
+  color: #e6e6e6;
+  opacity: 1;
+}
+
+#custom-caption {
+  color: #e6e6e6;
+  background: #222;
+}
+
+/* Controles de filtrado y ordenación */
+.filter-controls {
+  position: fixed;
+  top: calc(var(--upload-collapsed-height) + 12px);
+  left: 0;
+  right: 0;
+  background: linear-gradient(90deg, #141618 0%, #0f1214 100%);
+  border-bottom: 1px solid rgba(255, 145, 0, 0.3);
+  padding: 15px 20px;
+  z-index: 50;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-group label {
+  color: #e6e6e6;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.filter-group select {
+  background: #222;
+  color: #e6e6e6;
+  border: 1px solid #ff9100;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 14px;
+  min-width: 120px;
+}
+
+.filter-group select:focus {
+  outline: none;
+  border-color: #ffb74d;
+  box-shadow: 0 0 0 2px rgba(255, 145, 0, 0.2);
+}
+
+.clear-filters-btn {
+  background: rgba(255, 145, 0, 0.2);
+  color: #ff9100;
+  border: 1px solid #ff9100;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.clear-filters-btn:hover {
+  background: rgba(255, 145, 0, 0.3);
+  transform: translateY(-1px);
+}
+
+/* Ajustar padding del contenedor de previews cuando hay filtros */
+.filter-controls + #previewContainer {
+  padding-top: calc(16px + var(--upload-collapsed-height) + 70px) !important;
+}

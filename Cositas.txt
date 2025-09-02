@@ -1,3 +1,5 @@
+DRAG & DROP
+
 Resolución, que no se corte, que haga el corte en función de las medidas
 Adaptar tamaño de imagen a la pantalla
 Imágenes con dimensiones raras
@@ -7,3 +9,23 @@ Limitación de llamadas por IP al Worker
 Que solo se pueda subir a Instagram una vez cada puzzle en caso de descompletarlo y volver a hacerlo
 Pop-up de eliminación
 Que al abrir un puzle de 2x2 no esté resuelto ya xd
+Comprobar texto
+En content-script, que puedan aparecer piezas de más de una imagen.
+Comprobar imagen
+Filtros y ordenación en las imágenes
+BuyMeACoffee
+Iconos
+Refactorizar el código (xd)
+Botón deshacer puzle
+Que se añadan en tiempo real las imágenes al PUZLE
+Probar bien lo de que una pieza que sale en una pestaña no puede salir en otra
+Está saliendo más de una pieza a la vez
+Drag & Drop
+Poner un mensaje en la subida a Instagram que diga que hay que tener cuidado con lo que se sube, que te lo borro
+Subido a Instagram -> Enlace
+Si la imagen no se puede subir por el texto, entonces decirle que con otro texto alome
+Localización
+Si la imagen se borra que no salgan piezas
+Que si se borra una imagen y se vuelve a añadir, no deja
+Ha habido un momento en el que todo recargaba todo el rato y no salían piezas
+Media creation failed: {\"error\":{\"message\":\"The aspect ratio is not supported.

@@ -2,14 +2,62 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Find The Pieces - Gallery</title>
+  <title>Find the Pieces - Gallery</title>
   <link rel="stylesheet" href="./main.css">
 </head>
 <body>
+  <div id="contentScriptSwitch" style="position:fixed;top:18px;left:18px;z-index:200;display:flex;align-items:center;gap:8px;background:rgba(20,22,24,0.95);padding:8px 16px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.18);">
+  <label for="toggleContentScript" style="color:#ff9100;font-weight:600;font-size:15px;cursor:pointer;" title="If disabled, no puzzle pieces will appear while you browse.">Enable extension</label>
+  <span style="font-size:16px;color:#888;cursor:help;" title="If unchecked, puzzle pieces will not appear while you browse.">🛈</span>
+    <input type="checkbox" id="toggleContentScript" checked style="width:22px;height:22px;accent-color:#b2d900;cursor:pointer;">
+  </div>
   <div id="uploadBlock">
-    <h1>Find The Pieces 🧩</h1>
+    <h1>Find the Pieces 🧩</h1>
     <h2>Upload images, retrieve the pieces and solve the puzzle!</h2>
     <label class="choose-images-btn" id="chooseImagesBtn">Choose Images</label>
+  </div>
+
+  <!-- Filter and sort controls -->
+  <div id="filterControls" class="filter-controls" style="display: none;">
+    <div class="filter-row">
+      <div class="filter-group">
+        <label for="statusFilter">Status:</label>
+        <select id="statusFilter">
+          <option value="all">All</option>
+          <option value="completed">Completed</option>
+          <option value="incomplete">Incomplete</option>
+        </select>
+      </div>
+      
+      <div class="filter-group">
+        <label for="difficultyFilter">Difficulty:</label>
+        <select id="difficultyFilter">
+          <option value="all">All</option>
+          <option value="2">2x2 (Easy)</option>
+          <option value="3">3x3</option>
+          <option value="4">4x4</option>
+          <option value="5">5x5 (Medium)</option>
+          <option value="6">6x6</option>
+          <option value="7">7x7</option>
+          <option value="8">8x8 (Hard)</option>
+          <option value="9">9x9</option>
+          <option value="10">10x10 (Expert)</option>
+        </select>
+      </div>
+      
+      <div class="filter-group">
+        <label for="sortBy">Sort by:</label>
+        <select id="sortBy">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="completed-first">Completed first</option>
+          <option value="incomplete-first">Incomplete first</option>
+          <option value="difficulty">Difficulty</option>
+        </select>
+      </div>
+      
+      <button id="clearFilters" class="clear-filters-btn">Clear filters</button>
+    </div>
   </div>
 
   <!-- Modal for image upload -->
@@ -41,6 +89,16 @@
   </div>
 
   <div id="previewContainer"></div>
-  <script src="main.js"></script>
+  
+  <!-- Modular scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/puzzleLogic.js"></script>
+  <script src="js/instagram.js"></script>
+  <script src="js/celebrations.js"></script>
+  <script src="js/uiManager.js"></script>
+  <script src="js/puzzleSelfTest.js"></script>
+  <script src="js/fileUpload.js"></script>
+  <script src="js/main.js"></script>
 </body>
 </html>
