@@ -807,23 +807,32 @@ class UIManager {
                             // Precompute cell rectangles for robust hit testing
                             try {
                                 gridRect = grid.getBoundingClientRect();
-                                cellRects = Array.from(grid.children).map(el => ({
-                                    el,
-                                    idx: parseInt(el.dataset.index),
-                                    rect: el.getBoundingClientRect(),
-                                    cx: el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2,
-                                    cy: el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2
-                                }));
+                                cellRects = Array.from(grid.children).map(el => {
+                                    const rect = el.getBoundingClientRect();
+                                    return {
+                                        el,
+                                        idx: parseInt(el.dataset.index),
+                                        rect: rect,
+                                        cx: rect.left + rect.width / 2,
+                                        cy: rect.top + rect.height / 2
+                                    };
+                                });
                             } catch (_) { cellRects = null; }
                         };
 
                         const pickCell = (x, y) => {
-                            if (!cellRects || !gridRect) return { el: null, idx: null };
+                            if (!cellRects || !gridRect) {
+                                puzzleDebug('pickCell: Sin cellRects o gridRect', { hasCellRects: !!cellRects, hasGridRect: !!gridRect });
+                                return { el: null, idx: null };
+                            }
+                            
                             // If pointer within grid bounds, prefer containment
                             if (x >= gridRect.left && x <= gridRect.right && y >= gridRect.top && y <= gridRect.bottom) {
+                                // First try exact containment
                                 for (const c of cellRects) {
                                     const r = c.rect;
                                     if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+                                        puzzleDebug('pickCell: Encontrada por contencion exacta', { idx: c.idx, x, y, rect: r });
                                         return { el: c.el, idx: c.idx };
                                     }
                                 }
@@ -834,8 +843,13 @@ class UIManager {
                                     const d2 = dx*dx + dy*dy;
                                     if (d2 < bestD2) { bestD2 = d2; best = c; }
                                 }
+                                if (best) {
+                                    puzzleDebug('pickCell: Encontrada por distancia', { idx: best.idx, x, y, distance: Math.sqrt(bestD2) });
+                                }
                                 return best ? { el: best.el, idx: best.idx } : { el: null, idx: null };
                             }
+                            
+                            puzzleDebug('pickCell: Fuera de los límites del grid', { x, y, gridRect });
                             return { el: null, idx: null };
                         };
 
@@ -858,7 +872,7 @@ class UIManager {
                             window.currentPuzzleDragGhost.style.left = (e.clientX - window.currentPuzzleDragGhost.offsetWidth / 2) + 'px';
                             window.currentPuzzleDragGhost.style.top = (e.clientY - window.currentPuzzleDragGhost.offsetHeight / 2) + 'px';
 
-                // Determine and highlight current candidate drop cell
+                            // Determine and highlight current candidate drop cell
                             try {
                                 const { el: validCandidate, idx: overIdx } = pickCell(e.clientX, e.clientY);
                                 if (hoverCell !== validCandidate) {
@@ -877,7 +891,9 @@ class UIManager {
                                         puzzleDebug(`Arrastrando fuera de celdas (${e.clientX}, ${e.clientY})`, { fromIdx, x: e.clientX, y: e.clientY });
                                     }
                                 }
-                            } catch (_) { /* ignore */ }
+                            } catch (hoverErr) { 
+                                puzzleDebug('Error en detección de hover cell', { error: hoverErr.message, x: e.clientX, y: e.clientY });
+                            }
                         };
 
                         const onUp = (e) => {
@@ -900,7 +916,7 @@ class UIManager {
                                 suppressClicksUntil = Date.now() + 500; // Longer suppression for actual drags
                             }
                             
-                            puzzleDebug(`Fin de arrastre de pieza ${fromPiece} (celda ${fromIdx}) en (${e.clientX}, ${e.clientY})`, { fromIdx, pieceIndex: fromPiece, endX: e.clientX, endY: e.clientY, actuallyDragged: dragStarted });
+                            puzzleDebug(`Fin de arrastre de pieza ${fromPiece} (celda ${fromIdx}) en (${e.clientX}, ${e.clientY})`, { fromIdx, pieceIndex: fromPiece, endX: e.clientX, endY: e.clientY, actuallyDragged: dragStarted, hoverCell: !!hoverCell, hoverIdx });
 
                             // Determine drop target cell within this grid using robust hit testing
                             let dropCell = (hoverCell && hoverCell.parentElement === grid) ? hoverCell : null;
@@ -913,9 +929,52 @@ class UIManager {
                                 toIdx = picked.idx;
                             }
                             
+                            // Additional fallback: use elementFromPoint if pickCell failed
+                            if (!dropCell || toIdx === null) {
+                                try {
+                                    // Refresh cellRects in case positions changed during drag
+                                    gridRect = grid.getBoundingClientRect();
+                                    cellRects = Array.from(grid.children).map(el => {
+                                        const rect = el.getBoundingClientRect();
+                                        return {
+                                            el,
+                                            idx: parseInt(el.dataset.index),
+                                            rect: rect,
+                                            cx: rect.left + rect.width / 2,
+                                            cy: rect.top + rect.height / 2
+                                        };
+                                    });
+                                    
+                                    // Try pickCell again with refreshed data
+                                    const picked = pickCell(e.clientX, e.clientY);
+                                    if (picked.el && picked.idx !== null) {
+                                        dropCell = picked.el;
+                                        toIdx = picked.idx;
+                                        puzzleDebug('Destino encontrado tras refrescar cellRects', { toIdx });
+                                    } else {
+                                        // Final fallback: elementFromPoint
+                                        const elementBelow = document.elementFromPoint(e.clientX, e.clientY);
+                                        if (elementBelow) {
+                                            // Check if it's a grid cell or find the closest grid cell
+                                            let candidateCell = elementBelow;
+                                            if (!candidateCell.classList || !candidateCell.classList.contains('puzzle-cell')) {
+                                                candidateCell = elementBelow.closest('.puzzle-cell');
+                                            }
+                                            if (candidateCell && candidateCell.parentElement === grid && candidateCell.dataset.index) {
+                                                dropCell = candidateCell;
+                                                toIdx = parseInt(candidateCell.dataset.index);
+                                                puzzleDebug('Destino encontrado con elementFromPoint fallback', { toIdx, cellElement: !!candidateCell });
+                                            }
+                                        }
+                                    }
+                                } catch (fallbackErr) {
+                                    puzzleDebug('Error en fallback elementFromPoint', fallbackErr);
+                                }
+                            }
+                            
                             // Validate the drop target
                             if (!dropCell || dropCell.parentElement !== grid || toIdx === null || isNaN(toIdx)) {
-                                puzzleDebug('Soltar fuera del grid o destino inválido', { fromIdx, x: e.clientX, y: e.clientY, dropCell: !!dropCell, toIdx });
+                                puzzleDebug('Soltar fuera del grid o destino inválido', { fromIdx, x: e.clientX, y: e.clientY, dropCell: !!dropCell, toIdx, gridChildren: grid.children.length });
                                 return; // dropped outside grid or on another grid
                             }
                             
