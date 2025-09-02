@@ -743,24 +743,27 @@ class UIManager {
                 pieceImg.draggable = true;
                 
                 pieceImg.addEventListener('dragstart', (ev) => {
-                    const fromIdx = parseInt(cell.dataset.index);
+                    // Resolve the current cell at event time (avoid stale closure when canvas elements are moved)
+                    const currentCell = (ev.target && ev.target.closest) ? ev.target.closest('.puzzle-cell') : cell;
+                    const fromIdx = parseInt(currentCell.dataset.index);
                     const fromPiece = puzzleState[fromIdx];
                     puzzleDebug(`Iniciar arrastre: pieza ${fromPiece} desde celda ${fromIdx}`);
-                    
+
                     // Store drag data
                     ev.dataTransfer.setData('text/plain', JSON.stringify({
                         fromIdx: fromIdx,
                         fromPiece: fromPiece
                     }));
                     ev.dataTransfer.effectAllowed = 'move';
-                    
+
                     // Add visual feedback
-                    cell.style.opacity = '0.5';
+                    try { if (currentCell) currentCell.style.opacity = '0.5'; } catch (_) {}
                 });
-                
+
                 pieceImg.addEventListener('dragend', (ev) => {
-                    // Remove visual feedback
-                    cell.style.opacity = '1';
+                    // Remove visual feedback from the resolved cell
+                    const currentCell = (ev.target && ev.target.closest) ? ev.target.closest('.puzzle-cell') : cell;
+                    try { if (currentCell) currentCell.style.opacity = '1'; } catch (_) {}
                 });
             } else {
                 // Mostrar placeholder para pieza faltante o celda vacía
@@ -779,6 +782,8 @@ class UIManager {
             cell.addEventListener('dragover', (ev) => {
                 ev.preventDefault(); // Allow drop
                 cell.style.backgroundColor = '#e8f5e8'; // Visual feedback
+                // Highlight hovered cell with an orange border while dragging
+                try { cell.style.border = '3px solid #ff9100'; cell.style.zIndex = '5'; } catch (_) {}
             });
             
             cell.addEventListener('dragleave', (ev) => {
@@ -788,6 +793,8 @@ class UIManager {
                 } else {
                     cell.style.backgroundColor = '#f0f8ff';
                 }
+                // Remove hover highlight
+                try { cell.style.border = '1px solid #ddd'; cell.style.zIndex = ''; } catch (_) {}
             });
             
             cell.addEventListener('drop', (ev) => {
@@ -883,6 +890,29 @@ class UIManager {
                 
                 // Update visuals for affected cells
                 this.updatePuzzleCells(grid, puzzleState, imgObj, rows, cols, fromIdx, toIdx);
+
+        // Ensure any visual drag feedback is cleared on both source and destination cells
+                try {
+                    const srcCellEl = grid.children[fromIdx];
+                    const dstCellEl = grid.children[toIdx];
+                    if (srcCellEl) {
+                        srcCellEl.style.opacity = '1';
+                        srcCellEl.style.backgroundColor = (puzzleState[fromIdx] === null) ? '#f5f5f5' : '#f0f8ff';
+                        srcCellEl.style.cursor = (puzzleState[fromIdx] === null) ? 'pointer' : 'grab';
+            srcCellEl.style.border = '1px solid #ddd';
+            srcCellEl.style.zIndex = '';
+                    }
+                    if (dstCellEl) {
+                        dstCellEl.style.opacity = '1';
+                        dstCellEl.style.backgroundColor = (puzzleState[toIdx] === null) ? '#f5f5f5' : '#f0f8ff';
+                        dstCellEl.style.cursor = (puzzleState[toIdx] === null) ? 'pointer' : 'grab';
+            dstCellEl.style.border = '1px solid #ddd';
+            dstCellEl.style.zIndex = '';
+                    }
+                } catch (e) {
+                    // Non-fatal: visual cleanup best-effort
+                    console.warn('Visual cleanup after drop failed:', e);
+                }
             });
             
             grid.appendChild(cell);
@@ -1109,13 +1139,24 @@ class UIManager {
             // Intercambio: ambas celdas tienen canvas
             const fromParent = fromCanvas.parentNode;
             const toParent = toCanvas.parentNode;
-            const fromNextSibling = fromCanvas.nextSibling;
-            const toNextSibling = toCanvas.nextSibling;
-            
-            // Intercambiar los canvas
-            toParent.insertBefore(fromCanvas, toNextSibling);
-            fromParent.insertBefore(toCanvas, fromNextSibling);
-            
+
+            // If both canvases share the same parent (or are adjacent), do a safe swap using a placeholder
+            if (fromParent === toParent) {
+                const placeholder = document.createElement('div');
+                // Replace fromCanvas with placeholder
+                fromParent.replaceChild(placeholder, fromCanvas);
+                // Now replace toCanvas with fromCanvas (toCanvas still exists in DOM)
+                fromParent.replaceChild(fromCanvas, toCanvas);
+                // Finally replace placeholder with toCanvas
+                placeholder.parentNode.replaceChild(toCanvas, placeholder);
+            } else {
+                // Different parents: preserve original sibling positions
+                const fromNextSibling = fromCanvas.nextSibling;
+                const toNextSibling = toCanvas.nextSibling;
+                toParent.insertBefore(fromCanvas, toNextSibling);
+                fromParent.insertBefore(toCanvas, fromNextSibling);
+            }
+
         } else if (fromCanvas && !toCanvas) {
             // Mover de origen a destino (destino estaba vacío)
             toCell.appendChild(fromCanvas);
@@ -1631,25 +1672,52 @@ class UIManager {
                 customCaption: customCaption
             };
 
-            // Enviar al Worker de CloudFlare
-            const response = await fetch('https://findthepieces-igproxy.jmtdev0.workers.dev/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    imageBase64: puzzleImageBase64,
-                    puzzleInfo: puzzleInfo
-                })
-            });
-            if (typeof response !== 'undefined') {
-                console.log('[Instagram Upload] Worker response status:', response.status);
-            }
-            try {
-                result = await response.json();
-            } catch (jsonError) {
-                console.log('[Instagram Upload] Error parsing JSON:', jsonError);
-                result = null;
+            // Enviar al Worker de CloudFlare con reintentos para casos transitorios
+            let response = null;
+            let result = null;
+            const maxAttempts = 2;
+            const baseBackoff = 500; // ms
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    response = await fetch('https://findthepieces-igproxy.jmtdev0.workers.dev/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            imageBase64: puzzleImageBase64,
+                            puzzleInfo: puzzleInfo
+                        })
+                    });
+
+                    console.log(`[Instagram Upload] Worker response status: ${response.status} (attempt ${attempt}/${maxAttempts})`);
+
+                    // Try to parse body for logging even on non-OK responses
+                    try {
+                        result = await response.clone().json();
+                        console.log('[Instagram Upload] Worker response body (clone):', result);
+                    } catch (jsonErr) {
+                        console.log('[Instagram Upload] Could not parse worker response body (attempt ' + attempt + '):', jsonErr);
+                    }
+
+                    // If successful (2xx) break retry loop
+                    if (response.ok) {
+                        // Ensure result is parsed from the real response if not parsed above
+                        if (!result) {
+                            try { result = await response.json(); } catch (_) { result = null; }
+                        }
+                        break;
+                    }
+                } catch (err) {
+                    console.log(`[Instagram Upload] Fetch to worker failed on attempt ${attempt}:`, err);
+                }
+
+                // If not last attempt, wait with backoff then retry
+                if (attempt < maxAttempts) {
+                    const waitMs = baseBackoff * attempt;
+                    console.log(`[Instagram Upload] Retrying worker request in ${waitMs}ms...`);
+                    await new Promise(res => setTimeout(res, waitMs));
+                }
             }
             if (typeof result !== 'undefined' && result !== null) {
                 console.log('[Instagram Upload] Worker response body:', result);

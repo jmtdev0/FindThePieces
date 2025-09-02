@@ -29,3 +29,7 @@ Si la imagen se borra que no salgan piezas
 Que si se borra una imagen y se vuelve a añadir, no deja
 Ha habido un momento en el que todo recargaba todo el rato y no salían piezas
 Media creation failed: {\"error\":{\"message\":\"The aspect ratio is not supported.
+Bucle de [FTP contentScript] no passing candidates this attempt; retrying in 1s
+Cuando pulsas una pieza en una pestaña que lleva un rato abierta Uncaught Error: Extension context invalidated.
+    at collectPiece (contentScript.js:267:26)
+    at HTMLImageElement.<anonymous> (contentScript.js:255:9)
