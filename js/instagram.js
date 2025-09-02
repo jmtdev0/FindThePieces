@@ -4,10 +4,95 @@
 class InstagramManager {
     constructor() {
         this.workerUrl = 'https://findthepieces-igproxy.jmtdev0.workers.dev/';
+        // Instagram supported aspect ratios
+        this.instagramAspectRatios = {
+            minRatio: 0.8, // 4:5 portrait
+            maxRatio: 1.91, // 1.91:1 landscape
+            square: 1.0 // 1:1 square
+        };
+    }
+
+    // Check if aspect ratio is supported by Instagram
+    isValidAspectRatio(width, height) {
+        const ratio = width / height;
+        return ratio >= this.instagramAspectRatios.minRatio && ratio <= this.instagramAspectRatios.maxRatio;
+    }
+
+    // Get the closest valid aspect ratio for an image
+    getClosestValidAspectRatio(width, height) {
+        const ratio = width / height;
+        
+        if (ratio < this.instagramAspectRatios.minRatio) {
+            // Too tall, need to make it wider (add padding to sides)
+            return { ratio: this.instagramAspectRatios.minRatio, type: 'portrait' };
+        } else if (ratio > this.instagramAspectRatios.maxRatio) {
+            // Too wide, need to make it taller (add padding to top/bottom)
+            return { ratio: this.instagramAspectRatios.maxRatio, type: 'landscape' };
+        }
+        
+        // Already valid
+        return { ratio: ratio, type: 'valid' };
+    }
+
+    // Generate image with white padding to match Instagram aspect ratio
+    async generateImageWithPadding(imgObj, targetRatio) {
+        return new Promise((resolve) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const originalWidth = imgObj.width;
+            const originalHeight = imgObj.height;
+            const originalRatio = originalWidth / originalHeight;
+            
+            let newWidth, newHeight;
+            
+            if (targetRatio > originalRatio) {
+                // Need to add padding to sides
+                newHeight = originalHeight;
+                newWidth = Math.round(originalHeight * targetRatio);
+            } else {
+                // Need to add padding to top/bottom
+                newWidth = originalWidth;
+                newHeight = Math.round(originalWidth / targetRatio);
+            }
+            
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+            
+            const img = new Image();
+            img.onload = () => {
+                // Fill with white background
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, newWidth, newHeight);
+                
+                // Calculate position to center the original image
+                const x = (newWidth - originalWidth) / 2;
+                const y = (newHeight - originalHeight) / 2;
+                
+                // Draw the original image centered
+                ctx.drawImage(img, x, y, originalWidth, originalHeight);
+                
+                // Convert to JPG with quality 90
+                const base64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+                resolve({
+                    base64,
+                    paddedWidth: newWidth,
+                    paddedHeight: newHeight,
+                    paddingX: x,
+                    paddingY: y
+                });
+            };
+            img.src = imgObj.src;
+        });
     }
 
     // Generar imagen del puzzle completado
-    async generatePuzzleImage(imgObj, puzzleManager) {
+    async generatePuzzleImage(imgObj, puzzleManager, useAspectRatioCorrection = false) {
+        if (useAspectRatioCorrection && !this.isValidAspectRatio(imgObj.width, imgObj.height)) {
+            const closestRatio = this.getClosestValidAspectRatio(imgObj.width, imgObj.height);
+            return await this.generateImageWithPadding(imgObj, closestRatio.ratio);
+        }
+        
         return new Promise((resolve) => {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
@@ -27,17 +112,18 @@ class InstagramManager {
                 
                 // Convertir a JPG con calidad 90 (sin el prefijo data:image/jpeg;base64,)
                 const base64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
-                resolve(base64);
+                resolve({ base64 });
             };
             img.src = imgObj.src;
         });
     }
 
     // Subir imagen a Instagram
-    async uploadToInstagram(imgObj, puzzleManager, customCaption = null) {
+    async uploadToInstagram(imgObj, puzzleManager, customCaption = null, useAspectRatioCorrection = false) {
         try {
             // Generar imagen del puzzle completado
-            const puzzleImageBase64 = await this.generatePuzzleImage(imgObj, puzzleManager);
+            const imageResult = await this.generatePuzzleImage(imgObj, puzzleManager, useAspectRatioCorrection);
+            const puzzleImageBase64 = imageResult.base64;
             console.log('Generated image size:', puzzleImageBase64.length, 'characters');
 
             // Preparar información temporal y del puzzle
@@ -182,6 +268,168 @@ class InstagramManager {
         moderationMessage += `<div style="color: #90a4ae; font-size: 12px; margin-top: 8px;">Please try with different content that follows Instagram's community guidelines.</div>`;
         
         return moderationMessage;
+    }
+
+    // Show aspect ratio warning dialog with preview
+    async showAspectRatioDialog(imgObj) {
+        return new Promise((resolve) => {
+            const ratio = imgObj.width / imgObj.height;
+            const closestRatio = this.getClosestValidAspectRatio(imgObj.width, imgObj.height);
+            
+            // Create modal overlay
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                z-index: 10000;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                opacity: 0;
+                transition: opacity 0.3s ease;
+            `;
+            
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                background: #2a2a2a;
+                border-radius: 12px;
+                padding: 20px;
+                max-width: 600px;
+                max-height: 90vh;
+                overflow-y: auto;
+                color: white;
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+                transform: scale(0.9);
+                transition: transform 0.3s ease;
+            `;
+            
+            // Generate preview image with padding
+            this.generateImageWithPadding(imgObj, closestRatio.ratio).then(imageResult => {
+                const previewCanvas = document.createElement('canvas');
+                const previewCtx = previewCanvas.getContext('2d');
+                
+                // Create a smaller preview (max 400px width)
+                const maxPreviewWidth = 400;
+                const previewScale = Math.min(maxPreviewWidth / imageResult.paddedWidth, 1);
+                previewCanvas.width = imageResult.paddedWidth * previewScale;
+                previewCanvas.height = imageResult.paddedHeight * previewScale;
+                
+                const previewImg = new Image();
+                previewImg.onload = () => {
+                    // Draw the preview
+                    previewCtx.fillStyle = '#ffffff';
+                    previewCtx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
+                    previewCtx.drawImage(
+                        previewImg,
+                        imageResult.paddingX * previewScale,
+                        imageResult.paddingY * previewScale,
+                        imgObj.width * previewScale,
+                        imgObj.height * previewScale
+                    );
+                    
+                    modal.innerHTML = `
+                        <h3 style="margin: 0 0 15px 0; color: #ff9100;">📐 Aspect Ratio Not Supported</h3>
+                        <p style="margin: 0 0 15px 0; color: #ccc; line-height: 1.4;">
+                            Your image has an aspect ratio of <strong>${ratio.toFixed(2)}:1</strong>, which is not supported by Instagram.
+                        </p>
+                        <p style="margin: 0 0 15px 0; color: #ccc; line-height: 1.4;">
+                            Instagram supports ratios between <strong>0.8:1</strong> (portrait) and <strong>1.91:1</strong> (landscape).
+                        </p>
+                        <p style="margin: 0 0 20px 0; color: #b2d900; line-height: 1.4;">
+                            We can add white padding to make your image compatible. Here's how it would look:
+                        </p>
+                        <div style="text-align: center; margin: 20px 0;">
+                            <div style="margin-bottom: 10px;">
+                                <strong>Preview with white padding:</strong>
+                            </div>
+                            <div style="display: inline-block; border: 2px solid #666; border-radius: 8px; padding: 5px; background: #666;">
+                                ${previewCanvas.outerHTML}
+                            </div>
+                            <div style="margin-top: 10px; font-size: 12px; color: #aaa;">
+                                New dimensions: ${imageResult.paddedWidth} × ${imageResult.paddedHeight}
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+                            <button id="cancel-upload" style="
+                                background: rgba(255, 255, 255, 0.1);
+                                border: 2px solid #666;
+                                color: white;
+                                padding: 12px 20px;
+                                border-radius: 6px;
+                                cursor: pointer;
+                                font-size: 14px;
+                                transition: all 0.3s ease;
+                            ">Cancel</button>
+                            <button id="upload-with-padding" style="
+                                background: linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%);
+                                border: none;
+                                color: white;
+                                padding: 12px 20px;
+                                border-radius: 6px;
+                                cursor: pointer;
+                                font-size: 14px;
+                                font-weight: bold;
+                                transition: all 0.3s ease;
+                            ">Upload with Padding</button>
+                        </div>
+                    `;
+                    
+                    // Add event listeners
+                    const cancelBtn = modal.querySelector('#cancel-upload');
+                    const uploadBtn = modal.querySelector('#upload-with-padding');
+                    
+                    cancelBtn.addEventListener('click', () => {
+                        overlay.style.opacity = '0';
+                        modal.style.transform = 'scale(0.9)';
+                        setTimeout(() => {
+                            document.body.removeChild(overlay);
+                            resolve({ proceed: false });
+                        }, 300);
+                    });
+                    
+                    uploadBtn.addEventListener('click', () => {
+                        overlay.style.opacity = '0';
+                        modal.style.transform = 'scale(0.9)';
+                        setTimeout(() => {
+                            document.body.removeChild(overlay);
+                            resolve({ proceed: true, useCorrection: true });
+                        }, 300);
+                    });
+                    
+                    // Add hover effects
+                    cancelBtn.addEventListener('mouseenter', () => {
+                        cancelBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+                        cancelBtn.style.borderColor = '#999';
+                    });
+                    cancelBtn.addEventListener('mouseleave', () => {
+                        cancelBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+                        cancelBtn.style.borderColor = '#666';
+                    });
+                    
+                    uploadBtn.addEventListener('mouseenter', () => {
+                        uploadBtn.style.transform = 'scale(1.05)';
+                    });
+                    uploadBtn.addEventListener('mouseleave', () => {
+                        uploadBtn.style.transform = 'scale(1)';
+                    });
+                };
+                
+                previewImg.src = 'data:image/jpeg;base64,' + imageResult.base64;
+            });
+            
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+            
+            // Animate in
+            setTimeout(() => {
+                overlay.style.opacity = '1';
+                modal.style.transform = 'scale(1)';
+            }, 10);
+        });
     }
 }
 

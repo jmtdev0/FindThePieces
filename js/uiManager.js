@@ -1639,12 +1639,34 @@ class UIManager {
     async handleInstagramUpload(imgObj, idx, statusDiv, popup, uploadBtn, skipBtn, customizeCheckbox, customCaptionTextarea) {
         let result = null;
         try {
+            // Check aspect ratio before proceeding
+            if (window.instagramManager && !window.instagramManager.isValidAspectRatio(imgObj.width, imgObj.height)) {
+                if (statusDiv) statusDiv.textContent = 'Checking image compatibility...';
+                const aspectResult = await window.instagramManager.showAspectRatioDialog(imgObj);
+                
+                if (!aspectResult.proceed) {
+                    // User cancelled
+                    if (uploadBtn) {
+                        uploadBtn.disabled = false;
+                        uploadBtn.innerHTML = '📸 Share on Instagram';
+                    }
+                    if (statusDiv) statusDiv.textContent = '';
+                    return;
+                }
+                
+                // Continue with padding if user agreed
+                if (aspectResult.useCorrection && statusDiv) {
+                    statusDiv.textContent = 'Applying white padding...';
+                }
+            }
+
             if (uploadBtn) uploadBtn.disabled = true;
             if (uploadBtn) uploadBtn.innerHTML = '<span style="display: inline-block; width: 16px; height: 16px; border: 2px solid white; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span> Uploading...';
             if (statusDiv) statusDiv.textContent = 'Preparing image...';
 
-            // Generar imagen del puzzle completado
-            const puzzleImageBase64 = await this.generatePuzzleImage(imgObj, idx);
+            // Generar imagen del puzzle completado with aspect ratio correction if needed
+            const useCorrection = window.instagramManager && !window.instagramManager.isValidAspectRatio(imgObj.width, imgObj.height);
+            const puzzleImageBase64 = await this.generatePuzzleImage(imgObj, idx, useCorrection);
             console.log('Generated image size:', puzzleImageBase64.length, 'characters');
 
             if (statusDiv) statusDiv.textContent = 'Uploading to Instagram...';
@@ -1861,7 +1883,13 @@ class UIManager {
     }
 
     // Función para generar imagen del puzzle completado
-    async generatePuzzleImage(imgObj, idx) {
+    async generatePuzzleImage(imgObj, idx, useAspectRatioCorrection = false) {
+        // If aspect ratio correction is needed and InstagramManager is available, use it
+        if (useAspectRatioCorrection && window.instagramManager) {
+            const imageResult = await window.instagramManager.generatePuzzleImage(imgObj, window.puzzleManager, true);
+            return imageResult.base64;
+        }
+        
         return new Promise((resolve) => {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
