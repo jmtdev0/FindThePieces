@@ -1418,8 +1418,9 @@ class UIManager {
                             <span id="char-count">0</span>/2000 characters
                         </div>
                     </div>
+                    
                     <div id="upload-status" style="margin-bottom: 15px; text-align: center; font-size: 14px;"></div>
-                    <div style="display: flex; gap: 10px; justify-content: center;">
+                    <div style="display: flex; justify-content: center;">
                         <button id="upload-instagram" style="
                             background: linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%);
                             border: none;
@@ -1567,6 +1568,42 @@ class UIManager {
         const uploadBtn = popup.querySelector('#upload-instagram');
         const skipBtn = popup.querySelector('#skip-upload');
         const statusDiv = popup.querySelector('#upload-status');
+
+        // Insert a small info icon next to the upload button that shows a tooltip on hover/focus
+        try {
+            if (uploadBtn && uploadBtn.parentNode) {
+                const infoIcon = document.createElement('div');
+                infoIcon.className = 'ig-info-icon';
+                infoIcon.setAttribute('role', 'button');
+                infoIcon.setAttribute('aria-label', 'Instagram moderation info');
+                infoIcon.tabIndex = 0;
+                infoIcon.style.cssText = 'flex:0 0 20px; display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:rgba(255,255,255,0.06); cursor:default; margin-right:6px; position:relative;';
+                infoIcon.innerHTML = `
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="color:inherit;">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm.88 15h-1.75v-1.75h1.75V17zm0-3.5h-1.75V7.5h1.75V13.5z" fill="currentColor"></path>
+                    </svg>
+                    <div class="ig-tooltip" style="display:none; position:absolute; bottom:calc(100% + 10px); left:50%; transform:translateX(-50%); min-width:220px; max-width:360px; padding:8px 10px; border-radius:8px; background:rgba(0,0,0,0.85); color:white; font-size:12px; line-height:1.2; box-shadow:0 8px 20px rgba(0,0,0,0.3); z-index:10001; text-align:left;">
+                        Instagram requires that both the image and any custom caption comply with its Community Guidelines. Content will be reviewed by automated moderation and may be blocked if deemed inappropriate.
+                    </div>
+                `;
+                // Place the icon to the right of the upload button
+                if (uploadBtn.nextSibling) {
+                    uploadBtn.parentNode.insertBefore(infoIcon, uploadBtn.nextSibling);
+                } else {
+                    uploadBtn.parentNode.appendChild(infoIcon);
+                }
+
+                const tooltip = infoIcon.querySelector('.ig-tooltip');
+                const showTooltip = () => { try{ tooltip.style.display = 'block'; tooltip.setAttribute('aria-hidden', 'false'); }catch(_){} };
+                const hideTooltip = () => { try{ tooltip.style.display = 'none'; tooltip.setAttribute('aria-hidden', 'true'); }catch(_){} };
+                infoIcon.addEventListener('mouseenter', showTooltip);
+                infoIcon.addEventListener('mouseleave', hideTooltip);
+                infoIcon.addEventListener('focus', showTooltip);
+                infoIcon.addEventListener('blur', hideTooltip);
+                // Prevent accidental clicks from focusing other controls
+                infoIcon.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); infoIcon.focus(); });
+            }
+        } catch (err) { console.warn('Failed to insert ig info icon:', err); }
 
         // Manejar personalización de caption
         const customizeCheckbox = popup.querySelector('#customize-caption');

@@ -311,16 +311,16 @@ class InstagramManager {
             this.generateImageWithPadding(imgObj, closestRatio.ratio).then(imageResult => {
                 const previewCanvas = document.createElement('canvas');
                 const previewCtx = previewCanvas.getContext('2d');
-                
+
                 // Create a smaller preview (max 400px width)
                 const maxPreviewWidth = 400;
                 const previewScale = Math.min(maxPreviewWidth / imageResult.paddedWidth, 1);
-                previewCanvas.width = imageResult.paddedWidth * previewScale;
-                previewCanvas.height = imageResult.paddedHeight * previewScale;
-                
+                previewCanvas.width = Math.round(imageResult.paddedWidth * previewScale);
+                previewCanvas.height = Math.round(imageResult.paddedHeight * previewScale);
+
                 const previewImg = new Image();
                 previewImg.onload = () => {
-                    // Draw the preview
+                    // Draw the preview onto the canvas
                     previewCtx.fillStyle = '#ffffff';
                     previewCtx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
                     previewCtx.drawImage(
@@ -330,7 +330,8 @@ class InstagramManager {
                         imgObj.width * previewScale,
                         imgObj.height * previewScale
                     );
-                    
+
+                    // Build modal HTML but leave a placeholder for the canvas node
                     modal.innerHTML = `
                         <h3 style="margin: 0 0 15px 0; color: #ff9100;">📐 Aspect Ratio Not Supported</h3>
                         <p style="margin: 0 0 15px 0; color: #ccc; line-height: 1.4;">
@@ -346,9 +347,7 @@ class InstagramManager {
                             <div style="margin-bottom: 10px;">
                                 <strong>Preview with white padding:</strong>
                             </div>
-                            <div style="display: inline-block; border: 2px solid #666; border-radius: 8px; padding: 5px; background: #666;">
-                                ${previewCanvas.outerHTML}
-                            </div>
+                            <div id="preview-canvas-wrapper" style="display: inline-block; border: 2px solid #666; border-radius: 8px; padding: 5px; background: #666;"></div>
                             <div style="margin-top: 10px; font-size: 12px; color: #aaa;">
                                 New dimensions: ${imageResult.paddedWidth} × ${imageResult.paddedHeight}
                             </div>
@@ -377,11 +376,21 @@ class InstagramManager {
                             ">Upload with Padding</button>
                         </div>
                     `;
-                    
+
+                    // Insert the actual canvas node into the placeholder so the bitmap is visible
+                    const wrapper = modal.querySelector('#preview-canvas-wrapper');
+                    if (wrapper) {
+                        // Ensure the canvas displays at its natural size inside the wrapper
+                        previewCanvas.style.display = 'block';
+                        previewCanvas.style.maxWidth = '100%';
+                        previewCanvas.style.height = 'auto';
+                        wrapper.appendChild(previewCanvas);
+                    }
+
                     // Add event listeners
                     const cancelBtn = modal.querySelector('#cancel-upload');
                     const uploadBtn = modal.querySelector('#upload-with-padding');
-                    
+
                     cancelBtn.addEventListener('click', () => {
                         overlay.style.opacity = '0';
                         modal.style.transform = 'scale(0.9)';
@@ -390,7 +399,7 @@ class InstagramManager {
                             resolve({ proceed: false });
                         }, 300);
                     });
-                    
+
                     uploadBtn.addEventListener('click', () => {
                         overlay.style.opacity = '0';
                         modal.style.transform = 'scale(0.9)';
@@ -399,7 +408,7 @@ class InstagramManager {
                             resolve({ proceed: true, useCorrection: true });
                         }, 300);
                     });
-                    
+
                     // Add hover effects
                     cancelBtn.addEventListener('mouseenter', () => {
                         cancelBtn.style.background = 'rgba(255, 255, 255, 0.2)';
@@ -409,7 +418,7 @@ class InstagramManager {
                         cancelBtn.style.background = 'rgba(255, 255, 255, 0.1)';
                         cancelBtn.style.borderColor = '#666';
                     });
-                    
+
                     uploadBtn.addEventListener('mouseenter', () => {
                         uploadBtn.style.transform = 'scale(1.05)';
                     });
@@ -417,7 +426,7 @@ class InstagramManager {
                         uploadBtn.style.transform = 'scale(1)';
                     });
                 };
-                
+
                 previewImg.src = 'data:image/jpeg;base64,' + imageResult.base64;
             });
             

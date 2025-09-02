@@ -12,6 +12,8 @@ class FileUploadManager {
     initializeEventListeners() {
         // Modal handling
         document.getElementById('chooseImagesBtn').addEventListener('click', () => {
+            // Reset file input so selecting the same file again will fire a change event
+            try { this.imageInput.value = ''; } catch (_) {}
             this.modal.classList.add('show');
         });
 
@@ -105,9 +107,12 @@ class FileUploadManager {
                     if (window.findThePiecesApp) {
                         window.findThePiecesApp.addImage(imageData);
                     }
-                    
+
                     // Cerrar modal
                     this.modal.classList.remove('show');
+
+                    // Clear the file input so the same file can be selected again later
+                    try { this.imageInput.value = ''; } catch (_) {}
                 };
                 img.src = e.target.result;
             };

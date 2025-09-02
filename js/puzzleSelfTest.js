@@ -2,6 +2,13 @@
 // Debug-only self-test for drag & drop behavior, separated from UI code
 (function(){
   const DEBUG = true; // toggle if needed
+  // DISABLE SELF-TEST UI: never inject the Self-test DnD controls in any environment
+  const ENABLE_SELFTEST = false;
+  if (!ENABLE_SELFTEST) {
+    // keep the module loaded but no-op to ensure the button cannot be shown
+    try { console.log('[SelfTest] disabled by configuration'); } catch (_) {}
+    return;
+  }
 
   function attachSelfTest(UIClassPrototype) {
     const buildControls = (container, grid) => {
