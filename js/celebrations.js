@@ -239,6 +239,25 @@ Max 2000 characters." maxlength="2000" style="
             if (!window.instagramManager) return;
 
             try {
+                // Check aspect ratio before proceeding
+                if (!window.instagramManager.isValidAspectRatio(imgObj.width, imgObj.height)) {
+                    statusDiv.textContent = 'Checking image compatibility...';
+                    const aspectResult = await window.instagramManager.showAspectRatioDialog(imgObj);
+                    
+                    if (!aspectResult.proceed) {
+                        // User cancelled
+                        uploadBtn.disabled = false;
+                        uploadBtn.innerHTML = '📱 Share on Instagram';
+                        statusDiv.textContent = '';
+                        return;
+                    }
+                    
+                    // Continue with padding if user agreed
+                    if (aspectResult.useCorrection) {
+                        statusDiv.textContent = 'Applying white padding...';
+                    }
+                }
+
                 uploadBtn.disabled = true;
                 uploadBtn.innerHTML = '<span style="display: inline-block; width: 16px; height: 16px; border: 2px solid white; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span> Uploading...';
                 statusDiv.textContent = 'Preparing image...';
@@ -254,11 +273,13 @@ Max 2000 characters." maxlength="2000" style="
 
                 statusDiv.textContent = 'Uploading to Instagram...';
 
-                // Subir a Instagram
+                // Subir a Instagram with aspect ratio correction if needed
+                const useCorrection = !window.instagramManager.isValidAspectRatio(imgObj.width, imgObj.height);
                 const { response, result } = await window.instagramManager.uploadToInstagram(
                     imgObj, 
                     window.puzzleManager, 
-                    customCaption
+                    customCaption,
+                    useCorrection
                 );
 
                 // Procesar respuesta
