@@ -756,7 +756,7 @@ class UIManager {
                 // Drag & drop: start on mousedown without prior selection; on drop over another cell, swap or move
                 pieceImg.addEventListener('mousedown', (ev) => {
                     if (ev.button !== 0) return; // left button only
-                    // Do not prevent default here; allow the click to be delivered if no drag starts
+                    
                     const fromIdx = parseInt(cell.dataset.index);
                     const fromPiece = puzzleState[fromIdx];
                     puzzleDebug(`Iniciar arrastre de pieza ${fromPiece} (desde celda ${fromIdx})`, { fromIdx, pieceIndex: fromPiece });
@@ -769,12 +769,19 @@ class UIManager {
                         let gridRect = null;
                         const startX = ev.clientX;
                         const startY = ev.clientY;
+                        const startTime = Date.now();
                         let ghost = null;
+                        let dragStarted = false;
 
                         const ensureGhost = () => {
                             if (didDrag) return;
                             didDrag = true;
+                            dragStarted = true;
                             isDragging = true;
+                            
+                            // Prevent the click event from firing since we're starting a drag
+                            ev.preventDefault();
+                            
                             // Create drag ghost from the canvas content
                             const srcCanvas = pieceImg;
                             ghost = document.createElement('canvas');
@@ -835,7 +842,15 @@ class UIManager {
                         const onMove = (e) => {
                             const dx = Math.abs(e.clientX - startX);
                             const dy = Math.abs(e.clientY - startY);
-                            if (!didDrag && (dx > 4 || dy > 4)) {
+                            const timeSinceStart = Date.now() - startTime;
+                            
+                            // Require both distance (8px) AND time (100ms) OR significant distance (15px) to start drag
+                            const shouldStartDrag = !didDrag && (
+                                (dx > 8 || dy > 8) && timeSinceStart > 100 ||
+                                dx > 15 || dy > 15
+                            );
+                            
+                            if (shouldStartDrag) {
                                 ensureGhost();
                             }
                             if (!didDrag) return;
@@ -879,24 +894,34 @@ class UIManager {
                             }
                             window.currentPuzzleDragGhost = null;
                             isDragging = false;
-                            suppressClicksUntil = Date.now() + 300;
-                            puzzleDebug(`Fin de arrastre de pieza ${fromPiece} (celda ${fromIdx}) en (${e.clientX}, ${e.clientY})`, { fromIdx, pieceIndex: fromPiece, endX: e.clientX, endY: e.clientY });
+                            
+                            // Only suppress clicks if we actually dragged
+                            if (dragStarted) {
+                                suppressClicksUntil = Date.now() + 500; // Longer suppression for actual drags
+                            }
+                            
+                            puzzleDebug(`Fin de arrastre de pieza ${fromPiece} (celda ${fromIdx}) en (${e.clientX}, ${e.clientY})`, { fromIdx, pieceIndex: fromPiece, endX: e.clientX, endY: e.clientY, actuallyDragged: dragStarted });
 
                             // Determine drop target cell within this grid using robust hit testing
                             let dropCell = (hoverCell && hoverCell.parentElement === grid) ? hoverCell : null;
                             let toIdx = (hoverIdx !== null) ? hoverIdx : null;
+                            
+                            // Double-check with pickCell if we don't have a clear target
                             if (!dropCell || toIdx === null) {
                                 const picked = pickCell(e.clientX, e.clientY);
                                 dropCell = picked.el;
                                 toIdx = picked.idx;
                             }
-                            if (!dropCell || dropCell.parentElement !== grid || toIdx === null) {
-                                puzzleDebug('Soltar fuera del grid o destino inválido', { fromIdx, x: e.clientX, y: e.clientY });
+                            
+                            // Validate the drop target
+                            if (!dropCell || dropCell.parentElement !== grid || toIdx === null || isNaN(toIdx)) {
+                                puzzleDebug('Soltar fuera del grid o destino inválido', { fromIdx, x: e.clientX, y: e.clientY, dropCell: !!dropCell, toIdx });
                                 return; // dropped outside grid or on another grid
                             }
+                            
                             toIdx = parseInt(toIdx);
-                            if (isNaN(toIdx) || toIdx === fromIdx) {
-                                puzzleDebug('Soltar sobre la misma celda o índice inválido (sin cambios)', { fromIdx, toIdx });
+                            if (toIdx === fromIdx) {
+                                puzzleDebug('Soltar sobre la misma celda (sin cambios)', { fromIdx, toIdx });
                                 return;
                             }
 
