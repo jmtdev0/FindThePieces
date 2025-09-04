@@ -41,3 +41,5 @@ Sonidito ligero al coger la pieza
 -- Cada 30 segundos verificar que no se está mostrando ninguna pieza de una imagen para la que ya están todas recogidas
 -- Puzle de 100 piezas
 -- Desactivar los console.log
+Poder hacer zoom en la foto
+-- Hacer las líneas del puzle más finas
