@@ -22,6 +22,7 @@ class PuzzleManager {
         this.currentIdx = idx;
         this.currentImageIndex = idx;
         this.isViewingPuzzle = true;
+    try { if (window.updateBuyMeVisibility) window.updateBuyMeVisibility(); } catch (e) {}
         
         // Calcular dimensiones del puzzle basado en la dificultad
         const difficulty = document.getElementById('puzzleDifficulty').value;
@@ -160,6 +161,7 @@ class PuzzleManager {
         if (window.celebrationManager) {
             window.celebrationManager.showCongratulationsPopup(this.currentImageObj, this.currentIdx);
         }
+    try { if (window.updateBuyMeVisibility) updateBuyMeVisibility(); } catch (e) {}
     }
 
     // Manejar controles de teclado

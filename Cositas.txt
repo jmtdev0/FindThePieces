@@ -17,19 +17,27 @@ BuyMeACoffee
 Iconos
 Refactorizar el código (xd)
 Botón deshacer puzle
-Que se añadan en tiempo real las imágenes al PUZLE
+-- Que se añadan en tiempo real las imágenes al PUZLE
+-- Si se desactiva la extensión, que se oculten todas las piezas
+-- Que la preview de imágenes se vea en la pantalla
 Probar bien lo de que una pieza que sale en una pestaña no puede salir en otra
 Está saliendo más de una pieza a la vez
+-- No se está actualizando la frecuencia en tiempo real
 Drag & Drop
 Poner un mensaje en la subida a Instagram que diga que hay que tener cuidado con lo que se sube, que te lo borro
 Subido a Instagram -> Enlace
-Si la imagen no se puede subir por el texto, entonces decirle que con otro texto alome
+-- Si la imagen no se puede subir por el texto, entonces decirle que con otro texto alome
 Localización
 Si la imagen se borra que no salgan piezas
 Que si se borra una imagen y se vuelve a añadir, no deja
 Ha habido un momento en el que todo recargaba todo el rato y no salían piezas
 Media creation failed: {\"error\":{\"message\":\"The aspect ratio is not supported.
 Bucle de [FTP contentScript] no passing candidates this attempt; retrying in 1s
-Cuando pulsas una pieza en una pestaña que lleva un rato abierta Uncaught Error: Extension context invalidated.
+-- Cuando pulsas una pieza en una pestaña que lleva un rato abierta Uncaught Error: Extension context invalidated.
     at collectPiece (contentScript.js:267:26)
     at HTMLImageElement.<anonymous> (contentScript.js:255:9)
+Poder hacer zoom en el puzle
+Sonidito ligero al coger la pieza
+-- Cada 30 segundos verificar que no se está mostrando ninguna pieza de una imagen para la que ya están todas recogidas
+-- Puzle de 100 piezas
+-- Desactivar los console.log

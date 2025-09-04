@@ -307,6 +307,17 @@ Max 2000 characters." maxlength="2000" style="
                     statusDiv.innerHTML = moderationMessage;
                     uploadBtn.disabled = false;
                     uploadBtn.innerHTML = '📸 Share on Instagram';
+                    // Si el problema es el texto, abrir editor para reintento rápido
+                    if (processResult.moderation && processResult.moderation.reason === 'text' && popup) {
+                        try {
+                            const customizeCheckbox = popup.querySelector('#customize-caption');
+                            const captionContainer = popup.querySelector('#caption-container');
+                            const customCaptionTextarea = popup.querySelector('#custom-caption');
+                            if (customizeCheckbox && !customizeCheckbox.checked) customizeCheckbox.checked = true;
+                            if (captionContainer) captionContainer.style.display = 'block';
+                            if (customCaptionTextarea) customCaptionTextarea.focus();
+                        } catch (_) {}
+                    }
                 }
 
             } catch (error) {

@@ -131,6 +131,8 @@ class UIManager {
             `;
             this.previewContainer.appendChild(noResults);
         }
+    // Update buy-me widget visibility in case completion state changed
+    try { if (window.updateBuyMeVisibility) window.updateBuyMeVisibility(); } catch (e) {}
     }
 
     // Renderizar previews de todas las imágenes
@@ -165,6 +167,8 @@ class UIManager {
             const uploadBlock = document.getElementById('uploadBlock');
             if (uploadBlock) uploadBlock.style.display = '';
         }
+    // When returning to gallery, ensure buy-me widget reflects completion state
+    try { if (window.updateBuyMeVisibility) window.updateBuyMeVisibility(); } catch (e) {}
     }
 
     // Crear preview de una imagen
@@ -209,6 +213,12 @@ class UIManager {
     // Configurar popup hover
     setupHoverPopup(img, imgObj, idx) {
         let hoverPopup = null;
+    let hoverPopupWidth = 300;
+    let hoverPopupHeight = 120;
+    // rAF-based movement smoothing
+    let __hoverRAF = null;
+    let __hoverTargetLeft = 0;
+    let __hoverTargetTop = 0;
         
         img.addEventListener('mouseenter', () => {
             this.hideAllHoverPopups();
@@ -221,7 +231,44 @@ class UIManager {
             `;
             
             hoverPopup.style.display = 'block';
+            // Positioning hints for smoother movement
+            try {
+                hoverPopup.style.position = 'fixed';
+                hoverPopup.style.left = '0px';
+                hoverPopup.style.top = '0px';
+                hoverPopup.style.willChange = 'transform';
+                hoverPopup.style.pointerEvents = 'none';
+            } catch (e) {}
             document.body.appendChild(hoverPopup);
+            // Ensure the popup image fits inside the viewport; compute dimensions
+            try {
+                const popupImg = hoverPopup.querySelector('img');
+                if (popupImg) {
+                    // Limit to viewport with small margins
+                    // Limit popup to a percentage of the viewport to avoid filling the entire screen
+                    const maxW = Math.max(100, Math.round(window.innerWidth * 0.75));
+                    const maxH = Math.max(80, Math.round(window.innerHeight * 0.75));
+                    // When image loads compute scaled size
+                    popupImg.onload = function() {
+                        try {
+                            const natW = popupImg.naturalWidth || popupImg.width || 300;
+                            const natH = popupImg.naturalHeight || popupImg.height || 120;
+                            const scale = Math.min(1, maxW / natW, maxH / natH);
+                            const dispW = Math.max(80, Math.round(natW * scale));
+                            const dispH = Math.max(60, Math.round(natH * scale));
+                            popupImg.style.width = dispW + 'px';
+                            popupImg.style.height = dispH + 'px';
+                            hoverPopupWidth = dispW;
+                            hoverPopupHeight = dispH;
+                        } catch (e) {}
+                    };
+                    // Also apply sensible CSS defaults to keep layout stable
+                    popupImg.style.maxWidth = Math.max(80, Math.round(window.innerWidth * 0.75)) + 'px';
+                    popupImg.style.maxHeight = Math.max(60, Math.round(window.innerHeight * 0.75)) + 'px';
+                    popupImg.style.display = 'block';
+                    popupImg.style.objectFit = 'contain';
+                }
+            } catch (e) {}
         });
         
         img.addEventListener('mousemove', (e) => {
@@ -230,29 +277,46 @@ class UIManager {
                 const mouseY = e.clientY;
                 const windowWidth = window.innerWidth;
                 const windowHeight = window.innerHeight;
-                const popupWidth = 300;
-                const popupHeight = 120;
-                
-                let left = mouseX + 15;
+                const popupWidth = hoverPopupWidth || 300;
+                const popupHeight = hoverPopupHeight || 120;
+
+                const margin = 12;
+                const spaceRight = windowWidth - (mouseX + margin);
+                const spaceLeft = mouseX - margin;
+
+                let left = mouseX + 15; // default to the right of cursor
+                if (popupWidth + 30 > spaceRight && popupWidth + 30 <= spaceLeft) {
+                    // Prefer left when right is too tight but left has space
+                    left = Math.max(margin, mouseX - popupWidth - 15);
+                } else if (popupWidth + 30 > spaceRight && popupWidth + 30 > spaceLeft) {
+                    // Not enough space either side: clamp inside viewport
+                    left = Math.max(margin, Math.min(windowWidth - popupWidth - margin, mouseX + 15));
+                }
+
+                // Vertical centering near cursor with clamping
                 let top = mouseY - popupHeight / 2;
-                
-                if (left + popupWidth > windowWidth) {
-                    left = mouseX - popupWidth - 15;
+                if (top < margin) top = margin;
+                if (top + popupHeight > windowHeight - margin) top = Math.max(margin, windowHeight - popupHeight - margin);
+
+                // Schedule movement via requestAnimationFrame to avoid layout thrash
+                __hoverTargetLeft = Math.round(left);
+                __hoverTargetTop = Math.round(top);
+                if (!__hoverRAF) {
+                    __hoverRAF = requestAnimationFrame(() => {
+                        try {
+                            if (hoverPopup) {
+                                hoverPopup.style.transform = `translate3d(${__hoverTargetLeft}px, ${__hoverTargetTop}px, 0)`;
+                            }
+                        } catch (e) {}
+                        __hoverRAF = null;
+                    });
                 }
-                
-                if (top < 10) {
-                    top = 10;
-                } else if (top + popupHeight > windowHeight - 10) {
-                    top = windowHeight - popupHeight - 10;
-                }
-                
-                hoverPopup.style.left = left + 'px';
-                hoverPopup.style.top = top + 'px';
             }
         });
         
         img.addEventListener('mouseleave', () => {
             if (hoverPopup) {
+                try { if (__hoverRAF) { cancelAnimationFrame(__hoverRAF); __hoverRAF = null; } } catch (e) {}
                 document.body.removeChild(hoverPopup);
                 hoverPopup = null;
             }
@@ -1730,7 +1794,33 @@ class UIManager {
 
                 // Special handling for content moderation failures reported by Instagram
                 if (ig.error === 'Content moderation failed' && ig.moderation) {
-                    // Mark image as permanently blocked and persist moderation categories
+                    // If only the custom caption text was flagged, do NOT block the image; prompt user to edit caption and retry
+                    if (ig.moderation.reason === 'text') {
+                        // Re-open editor UI with caption box visible and focused
+                        if (statusDiv) {
+                            const moderationMessage = window.instagramManager.createModerationErrorMessage(ig.moderation);
+                            statusDiv.innerHTML = moderationMessage;
+                        }
+                        if (popup) {
+                            try {
+                                const customizeCheckbox = popup.querySelector('#customize-caption');
+                                const captionContainer = popup.querySelector('#caption-container');
+                                const customCaptionTextarea = popup.querySelector('#custom-caption');
+                                if (customizeCheckbox && !customizeCheckbox.checked) {
+                                    customizeCheckbox.checked = true;
+                                }
+                                if (captionContainer) captionContainer.style.display = 'block';
+                                if (customCaptionTextarea) customCaptionTextarea.focus();
+                            } catch (_) {}
+                        }
+                        // Restore button to allow resubmission
+                        if (uploadBtn) {
+                            uploadBtn.disabled = false;
+                            uploadBtn.innerHTML = '📸 Share on Instagram';
+                        }
+                        return;
+                    }
+                    // Image-level moderation -> mark permanently blocked and persist categories
                     imgObj.instagramBlocked = true;
                     const categories = ig.moderation.imageModeration?.categories || [];
                     imgObj.instagramModerationCategories = categories;
@@ -1740,7 +1830,6 @@ class UIManager {
                             instagramModerationCategories: categories
                         });
                     }
-                    // Throw so the existing catch block handles closing/re-opening the popup
                     const categoriesText = categories.length > 0 ? categories.join(', ') : 'inappropriate content';
                     throw new Error(`Content moderation failed: Image was flagged as ${categoriesText} and cannot be published to Instagram`);
                 } else {
@@ -1791,10 +1880,10 @@ class UIManager {
             } else {
                 if (result && result.instagram && result.instagram.error === "Content moderation failed" && result.instagram.moderation) {
                     console.log('[Instagram Upload] Moderation error:', result.instagram.moderation);
-                    // Marcar imagen como permanentemente bloqueada para Instagram
-                    if (result.instagram.permanentlyBlocked) {
+                    const isTextOnly = result.instagram.moderation.reason === 'text';
+                    if (!isTextOnly && result.instagram.permanentlyBlocked) {
+                        // Image flagged -> permanently block
                         imgObj.instagramBlocked = true;
-                        // Guardar las categorías de moderación
                         const categories = result.instagram.moderation.imageModeration?.categories || [];
                         imgObj.instagramModerationCategories = categories;
                         if (window.findThePiecesApp) {
@@ -1808,6 +1897,29 @@ class UIManager {
                     console.log('[Instagram Upload] Error:', result ? (result.error || result.instagram?.error || 'Upload failed') : 'No result from worker');
                 }
                 if (result && result.instagram && result.instagram.error === "Content moderation failed" && result.instagram.moderation) {
+                    if (result.instagram.moderation.reason === 'text') {
+                        // Show retry path (handled above). Avoid throwing to keep popup open.
+                        if (statusDiv) {
+                            const moderationMessage = window.instagramManager.createModerationErrorMessage(result.instagram.moderation);
+                            statusDiv.innerHTML = moderationMessage;
+                        }
+                        if (uploadBtn) {
+                            uploadBtn.disabled = false;
+                            uploadBtn.innerHTML = '📸 Share on Instagram';
+                        }
+                        // Ensure caption editor is visible
+                        if (popup) {
+                            try {
+                                const customizeCheckbox = popup.querySelector('#customize-caption');
+                                const captionContainer = popup.querySelector('#caption-container');
+                                const customCaptionTextarea = popup.querySelector('#custom-caption');
+                                if (customizeCheckbox && !customizeCheckbox.checked) customizeCheckbox.checked = true;
+                                if (captionContainer) captionContainer.style.display = 'block';
+                                if (customCaptionTextarea) customCaptionTextarea.focus();
+                            } catch (_) {}
+                        }
+                        return;
+                    }
                     const categories = result.instagram.moderation.imageModeration?.categories || [];
                     const categoriesText = categories.length > 0 ? categories.join(', ') : 'inappropriate content';
                     throw new Error(`Content moderation failed: Image was flagged as ${categoriesText} and cannot be published to Instagram`);
@@ -1820,23 +1932,21 @@ class UIManager {
             
             // Verificar si es un error de moderación de contenido
             if (error.message && error.message.includes('Content moderation failed')) {
-                // Marcar imagen como permanentemente bloqueada
-                imgObj.instagramBlocked = true;
-                
-                // Intentar extraer categorías del mensaje de error
-                let categories = [];
-                const match = error.message.match(/flagged as (.+?) and cannot be published/);
-                if (match) {
-                    const categoriesText = match[1].trim();
-                    categories = categoriesText.split(',').map(cat => cat.trim());
-                }
-                imgObj.instagramModerationCategories = categories;
-                
-                if (window.findThePiecesApp) {
-                    window.findThePiecesApp.updateImageSilent(idx, {
-                        instagramBlocked: true,
-                        instagramModerationCategories: categories
-                    });
+                // If this came from image-level moderation, keep blocked=true; if text-only, do not block
+                if (result && result.instagram && result.instagram.moderation) {
+                    if (result.instagram.moderation.reason === 'image') {
+                        imgObj.instagramBlocked = true;
+                        let categories = result.instagram.moderation.imageModeration?.categories || [];
+                        imgObj.instagramModerationCategories = categories;
+                        if (window.findThePiecesApp) {
+                            window.findThePiecesApp.updateImageSilent(idx, {
+                                instagramBlocked: true,
+                                instagramModerationCategories: categories
+                            });
+                        }
+                    } else {
+                        // text-only -> do not set blocked
+                    }
                 }
             }
             
@@ -2124,7 +2234,19 @@ class UIManager {
         
         // Buscar el grid actual del puzzle
         const currentGrid = document.getElementById('puzzle-grid');
-        if (!currentGrid) return;
+        // If there's no grid yet (we're showing the empty placeholder), render the detail view
+        // so the incoming piece is displayed in the freshly-created grid.
+        if (!currentGrid) {
+            try {
+                const puzzleData = window.puzzleManager && window.puzzleManager.initializePuzzle ? window.puzzleManager.initializePuzzle(imgObj, idx) : null;
+                if (puzzleData) {
+                    this.renderDetailView(imgObj, idx, puzzleData);
+                    return;
+                }
+            } catch (e) {
+                return;
+            }
+        }
         
         // Obtener estado actual del puzzle
         let puzzleState = imgObj.puzzleState || [];
@@ -2168,34 +2290,77 @@ class UIManager {
         }
         
         if (targetPosition !== null) {
+            // Re-validate that the chosen targetPosition is actually empty in the rendered grid.
+            // Another piece may have been added meanwhile; prefer a truly empty cell.
+            let finalPosition = null;
+            try {
+                for (let pos of emptyPositions) {
+                    // prefer positions that are not the correct place for the piece
+                    if (pos === pieceIndex) continue;
+                    const cell = currentGrid.children[pos];
+                    let occupied = false;
+                    try {
+                        if (cell) {
+                            // If cell has a canvas (rendered piece) or non-empty content, it's occupied
+                            if (cell.querySelector && (cell.querySelector('canvas') || cell.querySelector('img') || cell.innerHTML.trim() !== '')) {
+                                occupied = true;
+                            }
+                        }
+                    } catch (e) { occupied = false; }
+                    if (!occupied) { finalPosition = pos; break; }
+                }
+
+                // If we didn't find a non-correct empty cell, try any empty cell (including possibly the correct one)
+                if (finalPosition === null) {
+                    for (let pos of emptyPositions) {
+                        const cell = currentGrid.children[pos];
+                        let occupied = false;
+                        try {
+                            if (cell) {
+                                if (cell.querySelector && (cell.querySelector('canvas') || cell.querySelector('img') || cell.innerHTML.trim() !== '')) {
+                                    occupied = true;
+                                }
+                            }
+                        } catch (e) { occupied = false; }
+                        if (!occupied) { finalPosition = pos; break; }
+                    }
+                }
+            } catch (e) {
+                // If something goes wrong, fall back to original targetPosition
+                finalPosition = targetPosition;
+            }
+
+            if (finalPosition === null) {
+                // No truly empty cell found; abort to avoid overwriting an existing piece
+                console.warn(`addPieceToCurrentPuzzle: no empty cell available to place piece ${pieceIndex}; aborting`);
+                return;
+            }
+
             // Actualizar el estado del puzzle
-            puzzleState[targetPosition] = pieceIndex;
+            puzzleState[finalPosition] = pieceIndex;
             
             // Guardar cambios
             if (window.findThePiecesApp) {
                 window.findThePiecesApp.updateImageSilent(idx, { puzzleState: puzzleState });
             }
             
-            // Actualizar la celda visual
-            const targetCell = currentGrid.children[targetPosition];
-            
-            if (targetCell) {
-                // Obtener dimensiones de la celda de manera más robusta
-                const cellRect = targetCell.getBoundingClientRect();
-                const cellWidth = parseInt(targetCell.style.width) || cellRect.width || 100;
-                const cellHeight = parseInt(targetCell.style.height) || cellRect.height || 100;
-                
-                this.renderSingleCell(targetCell, pieceIndex, imgObj.collectedPieces, imgObj, rows, cols, 
-                    cellWidth, cellHeight, true); // Forzar renderizado de la nueva pieza
-                
-                // Añadir efecto visual de nueva pieza
-                targetCell.style.animation = 'pulse 0.5s ease-in-out';
-                setTimeout(() => {
-                    targetCell.style.animation = '';
-                }, 500);
-                
+            // Persistir el nuevo estado y re-renderizar la vista de detalle completa
+            if (window.findThePiecesApp) {
+                try {
+                    window.findThePiecesApp.updateImageSilent(idx, { puzzleState: puzzleState });
+                } catch (e) {
+                    try { window.storageManager && window.storageManager.saveImages && window.storageManager.saveImages(window.allImages); } catch (_) {}
+                }
             } else {
-                console.error(`UIManager: Could not find target cell at position ${targetPosition}`);
+                try { window.storageManager && window.storageManager.saveImages && window.storageManager.saveImages(window.allImages); } catch (_) {}
+            }
+
+            // Re-render the full detail view so event handlers are attached properly
+            try {
+                const puzzleData = { rows: rows, cols: cols, totalPieces: totalPieces };
+                this.renderDetailView(imgObj, idx, puzzleData);
+            } catch (reErr) {
+                console.error('Error re-rendering detail after adding piece:', reErr);
             }
             
             // Actualizar el título del puzzle con el nuevo conteo

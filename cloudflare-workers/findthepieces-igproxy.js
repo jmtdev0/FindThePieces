@@ -145,12 +145,16 @@ export default {
           
           if (!moderationResult.approved) {
             // Contenido no apropiado, no publicar en Instagram
+            // Si solo el texto personalizado fue marcado, NO bloquear permanentemente y permitir reintentar con otro texto
+            const isTextOnly = moderationResult.reason === 'text';
             instagramResult = {
               success: false,
               error: "Content moderation failed",
               moderation: moderationResult,
-              message: "Content was flagged as inappropriate and cannot be published to Instagram.",
-              permanentlyBlocked: true // Flag para indicar que no se debe intentar más
+              message: isTextOnly
+                ? "Custom caption was flagged as inappropriate. Please try again with a different caption."
+                : "Content was flagged as inappropriate and cannot be published to Instagram.",
+              permanentlyBlocked: !isTextOnly // Bloquear solo si la imagen es el problema
             };
             
             // Devolver error 500 para fallos de moderación

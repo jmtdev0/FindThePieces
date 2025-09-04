@@ -72,7 +72,8 @@ const MessageSystem = {
         this.broadcastToContentScripts({
             type: 'FREQUENCY_CHANGED',
             imageIndex: imageIndex,
-            frequency: newFrequency
+            frequency: newFrequency,
+            oldFrequency: typeof arguments[2] !== 'undefined' ? arguments[2] : null
         });
     },
 
@@ -112,6 +113,15 @@ const MessageSystem = {
             type: 'NEW_IMAGE_ADDED',
             imageIndex: imageIndex,
             imageData: imageData
+        });
+    },
+
+    // Notificar que una imagen fue eliminada (para que los contentScripts limpien piezas asociadas)
+    notifyImageRemoved(imageIndex) {
+        console.log(`Broadcasting image removed: ${imageIndex}`);
+        this.broadcastToContentScripts({
+            type: 'IMAGE_REMOVED',
+            imageIndex: imageIndex
         });
     },
 
@@ -156,6 +166,8 @@ function handlePieceCollectedFromContent(imageIndex, pieceIndex, collectedPieces
     if (imageIndex >= 0 && imageIndex < allImages.length) {
         allImages[imageIndex].collectedPieces = collectedPieces;
         window.allImages = allImages;
+
+    try { updateBuyMeVisibility(); } catch (e) {}
         
         console.log(`Main: Updated allImages[${imageIndex}].collectedPieces:`, allImages[imageIndex].collectedPieces);
         
@@ -198,6 +210,93 @@ function handlePieceCollectedFromContent(imageIndex, pieceIndex, collectedPieces
     }
 }
 
+// Buy-me widget: rounded icon that appears when the user has completed at least one puzzle
+let __buyMeWidget = null;
+let __buyMeAudio = null;
+// Playback rate state for hover acceleration
+let __buyMePlaybackRate = 1.0;
+const __buyMePlaybackIncrement = 0.25;
+const __buyMePlaybackMax = 5.0;
+function showBuyMeWidget() {
+    try {
+    // Do not show the widget while viewing a puzzle
+    if (window.puzzleManager && window.puzzleManager.isViewingPuzzle) return;
+    if (__buyMeWidget) return;
+        const a = document.createElement('a');
+        a.id = 'ftp-buyme-widget';
+        a.href = 'https://buymeacoffee.com/jmtdev';
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.style.cssText = [
+            'position:fixed',
+            'right:18px',
+            'bottom:18px',
+            'width:56px',
+            'height:56px',
+            'border-radius:50%',
+            'overflow:hidden',
+            'z-index:10000',
+            'box-shadow:0 6px 18px rgba(0,0,0,0.25)',
+            'display:flex',
+            'align-items:center',
+            'justify-content:center',
+            'background:#fff'
+        ].join(';');
+
+        const img = document.createElement('img');
+        img.src = chrome.runtime && chrome.runtime.getURL ? chrome.runtime.getURL('icons/buymeacoffee.png') : './icons/buymeacoffee.png';
+        img.alt = 'Buy me a coffee';
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+        a.appendChild(img);
+
+        // Prepare audio
+        try {
+            const audioSrc = chrome.runtime && chrome.runtime.getURL ? chrome.runtime.getURL('sounds/buymeabook.mp3') : './sounds/buymeabook.mp3';
+            __buyMeAudio = new Audio(audioSrc);
+            __buyMeAudio.preload = 'auto';
+            __buyMeAudio.loop = false;
+        } catch (e) { __buyMeAudio = null; }
+
+        // Play on hover (mouseenter) and stop on mouseleave
+        a.addEventListener('mouseenter', () => {
+            try {
+                if (!__buyMeAudio) return;
+                // Use current playback rate, then increment for next hover
+                __buyMeAudio.playbackRate = __buyMePlaybackRate;
+                __buyMeAudio.currentTime = 0;
+                __buyMeAudio.play && __buyMeAudio.play().catch(() => {});
+                // Increase for next time, but cap at max
+                __buyMePlaybackRate = Math.min(__buyMePlaybackMax, (__buyMePlaybackRate + __buyMePlaybackIncrement));
+            } catch (e) {}
+        });
+        a.addEventListener('mouseleave', () => { try { if (__buyMeAudio) { __buyMeAudio.pause(); __buyMeAudio.currentTime = 0; } } catch (e) {} });
+
+        document.body.appendChild(a);
+        __buyMeWidget = a;
+    } catch (e) {}
+}
+
+function removeBuyMeWidget() {
+    try {
+        if (__buyMeWidget && __buyMeWidget.parentNode) __buyMeWidget.parentNode.removeChild(__buyMeWidget);
+    } catch (e) {}
+    __buyMeWidget = null;
+    try { if (__buyMeAudio) { __buyMeAudio.pause(); __buyMeAudio = null; } } catch (e) {}
+    // Reset playback rate to default when widget removed
+    __buyMePlaybackRate = 1.0;
+}
+
+function updateBuyMeVisibility() {
+    try {
+    // If the user is viewing a puzzle, hide the widget (only show in gallery)
+    if (window.puzzleManager && window.puzzleManager.isViewingPuzzle) { removeBuyMeWidget(); return; }
+    // Check if any image is fully completed (explicit completed flag)
+    if (!window.allImages || !Array.isArray(window.allImages)) return;
+    const anyCompleted = window.allImages.some(img => !!img && img.completed === true);
+    if (anyCompleted) showBuyMeWidget(); else removeBuyMeWidget();
+    } catch (e) {}
+}
+
 // Inicialización cuando el DOM esté listo
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('FindThePieces - Inicializando aplicación...');
@@ -212,6 +311,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         // Renderizar previews iniciales
         window.uiManager.renderPreviews();
+    // Update visibility of buy-me widget based on completed puzzles
+    try { updateBuyMeVisibility(); } catch (e) {}
         
         // Configurar event listeners globales
         setupGlobalEventListeners();
@@ -283,7 +384,7 @@ window.findThePiecesApp = {
             
             // Notificar cambios específicos al contentScript
             if (updates.frequency !== undefined && updates.frequency !== oldImage.frequency) {
-                window.MessageSystem.notifyFrequencyChange(idx, updates.frequency);
+                window.MessageSystem.notifyFrequencyChange(idx, updates.frequency, oldImage.frequency);
             }
             
             if (updates.collectedPieces !== undefined) {
@@ -296,6 +397,7 @@ window.findThePiecesApp = {
             
             if (updates.completed === true && !oldImage.completed) {
                 window.MessageSystem.notifyPuzzleCompleted(idx);
+                try { updateBuyMeVisibility(); } catch (e) {}
             }
         }
     },
@@ -307,6 +409,10 @@ window.findThePiecesApp = {
             window.allImages = allImages; // Actualizar referencia global
             window.storageManager.saveImages(allImages);
             window.uiManager.renderPreviews();
+            // Notify content scripts to remove any pieces belonging to this image
+            if (window.MessageSystem) {
+                window.MessageSystem.notifyImageRemoved(idx);
+            }
             return true;
         }
         return false;
