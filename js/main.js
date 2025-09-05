@@ -88,13 +88,12 @@ const MessageSystem = {
     },
 
     // Notificar cambio de estado de puzzle
+    // notifyPuzzleStateUpdate: intentionally disabled to avoid broadcasting full puzzleState to all tabs
+    // Reason: content scripts do not consume PUZZLE_STATE_UPDATED and broadcasting large arrays
+    // on each move causes unnecessary CPU/IPC overhead. Keep method for backwards-compatibility.
     notifyPuzzleStateUpdate(imageIndex, puzzleState) {
-        console.log(`Broadcasting puzzle state update for image ${imageIndex}:`, puzzleState);
-        this.broadcastToContentScripts({
-            type: 'PUZZLE_STATE_UPDATED',
-            imageIndex: imageIndex,
-            puzzleState: puzzleState
-        });
+        // no-op
+        return;
     },
 
     // Notificar que una imagen fue completada
@@ -391,9 +390,10 @@ window.findThePiecesApp = {
                 window.MessageSystem.notifyPiecesUpdate(idx, updates.collectedPieces);
             }
             
-            if (updates.puzzleState !== undefined) {
-                window.MessageSystem.notifyPuzzleStateUpdate(idx, updates.puzzleState);
-            }
+            // puzzleState updates are no longer broadcast to content scripts to avoid expensive IPC
+            // if (updates.puzzleState !== undefined) {
+            //     window.MessageSystem.notifyPuzzleStateUpdate(idx, updates.puzzleState);
+            // }
             
             if (updates.completed === true && !oldImage.completed) {
                 window.MessageSystem.notifyPuzzleCompleted(idx);
