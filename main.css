@@ -774,3 +774,32 @@ label[for="imageInput"]:hover, .choose-images-btn:hover {
 .filter-controls + #previewContainer {
   padding-top: calc(16px + var(--upload-collapsed-height) + 70px) !important;
 }
+
+/* Simple hover tooltip for info icon */
+.hover-tooltip {
+  position: relative;
+}
+.hover-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  transform: translateX(calc(-50% + 12px)) translateY(8px);
+  bottom: -36px;
+  background: rgba(20,22,24,0.98);
+  color: #e6e6e6;
+  border: 1px solid rgba(255,145,0,0.5);
+  padding: 6px 10px;
+  border-radius: 8px;
+  white-space: nowrap;
+  max-width: none;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 9999;
+}
+.hover-tooltip:hover::after {
+  opacity: 1;
+  transform: translateX(calc(-50% + 12px)) translateY(4px);
+}

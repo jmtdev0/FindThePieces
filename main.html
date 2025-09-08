@@ -8,7 +8,7 @@
 <body>
   <div id="contentScriptSwitch" style="position:fixed;top:18px;left:18px;z-index:200;display:flex;align-items:center;gap:8px;background:rgba(20,22,24,0.95);padding:8px 16px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.18);">
   <label for="toggleContentScript" style="color:#ff9100;font-weight:600;font-size:15px;cursor:pointer;" title="If disabled, no puzzle pieces will appear while you browse.">Enable extension</label>
-  <span style="font-size:16px;color:#888;cursor:help;" title="If unchecked, puzzle pieces will not appear while you browse.">🛈</span>
+  <span class="hover-tooltip" style="font-size:16px;color:#888;cursor:help;" data-tooltip="If unchecked, puzzle pieces will not appear while you browse.">🛈</span>
     <input type="checkbox" id="toggleContentScript" checked style="width:22px;height:22px;accent-color:#b2d900;cursor:pointer;">
   </div>
   <div id="uploadBlock">
@@ -63,7 +63,8 @@
   <!-- Modal for image upload -->
   <div id="uploadModal" class="modal">
     <div class="modal-content">
-      <h3>Choose images to create puzzles</h3>
+    <h3>Choose images to create puzzles 
+      <span class="hover-tooltip" style="font-size:16px;color:#888;cursor:help;margin-left:8px;vertical-align:middle;" data-tooltip="Try to choose an image with clear, irregular features and distinct regions, because images with large uniform areas or single-color zones make it very hard or impossible to determine which piece fits where.">🛈</span></h3>
       <div class="difficulty-selector">
         <label for="puzzleDifficulty">Choose puzzle size:</label>
         <select id="puzzleDifficulty" class="puzzle-select">

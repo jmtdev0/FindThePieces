@@ -57,14 +57,20 @@
   // - If freq >= 100 => p = 0.01 (exception)
   // - Else p = 1 - (freq / 100)
   function probabilityFromFrequency(freq) {
-    const f = (typeof freq === 'number' && isFinite(freq)) ? freq : 5;
-    if (f <= 1) return 1;
-    if (f >= 100) return 0.01;
-    const p = 1 - (f / 100);
-    // Guard tiny numerical drift
-    if (p < 0.01) return 0.01;
-    if (p > 1) return 1;
-    return p;
+  const f = (typeof freq === 'number' && isFinite(freq)) ? freq : 5;
+  // Keep the exceptional rule: frequency 1 always yields probability 1
+  if (f <= 1) return 1;
+  // Preserve an upper frequency guard to avoid nonsensical inputs
+  if (f >= 100) return 0.01;
+
+  // Original mapping: p = 1 - (f / 100)
+  // New requirement: reduce probability to half of the original
+  const base = 1 - (f / 100);
+  let p = base / 2;
+  // Guard tiny numerical drift and keep within [0.01, 1]
+  if (p < 0.01) return 0.01;
+  if (p > 1) return 1;
+  return p;
   }
 
   function rectsOverlap(r1, r2, margin = 8) {
@@ -755,6 +761,27 @@
   }
 
   function collectPiece(imgIdx, pieceIdx, element) {
+      // Optimistic UI: play sound and remove the element immediately
+      try {
+        const src = (chrome && chrome.runtime && chrome.runtime.getURL) ? chrome.runtime.getURL('sounds/pop.mp3') : 'sounds/pop.mp3';
+        // Reuse a single Audio instance could be an improvement; keep simple here
+        const sfx = new Audio(src);
+        try { sfx.volume = 0.6; } catch (_) {}
+        // Fire-and-forget; do not block UI
+        sfx.play().catch(() => {});
+      } catch (e) { try { console.warn('[FTP contentScript] failed to play collect sound (optimistic)', e); } catch (_) {} }
+      try { element && element.remove && element.remove(); } catch (_) {}
+
+      // Immediately notify background so all tabs can remove matching pieces without waiting for storage
+      try {
+        chrome.runtime && chrome.runtime.sendMessage && chrome.runtime.sendMessage({
+          type: 'PIECE_COLLECTED',
+          imageIndex: imgIdx,
+          pieceIndex: pieceIdx
+        });
+      } catch (_) {}
+
+      // Then update storage state asynchronously
       chrome.storage.local.get(['findThePiecesImages', 'findThePixelsImages'], (result) => {
       // Buscar en ambas claves
       const imagesArr = result.findThePiecesImages || result.findThePixelsImages;
@@ -779,26 +806,17 @@
         // Guardar en la clave correcta
         let key = result.findThePiecesImages ? 'findThePiecesImages' : 'findThePixelsImages';
         chrome.storage.local.set({ [key]: imgs }, () => {
-          // Play collection sound (user gesture should allow playback)
+          // Notify main page / UI layer with collectedPieces (optional extra payload)
           try {
-            const src = (chrome && chrome.runtime && chrome.runtime.getURL) ? chrome.runtime.getURL('sounds/pop.mp3') : 'sounds/pop.mp3';
-            const sfx = new Audio(src);
-            try { sfx.volume = 0.6; } catch (_) {}
-            sfx.play().catch(() => {});
-          } catch (e) { try { console.warn('[FTP contentScript] failed to play collect sound', e); } catch (_) {} }
-
-          // Remove the visual element after triggering sound playback
-          try { element.remove(); } catch (e) {}
-          
-          // Enviar mensaje al main script para actualizar la UI
-          if (chrome.runtime && chrome.runtime.sendMessage) {
-            chrome.runtime.sendMessage({
-              type: 'PIECE_COLLECTED',
-              imageIndex: imgIdx,
-              pieceIndex: pieceIdx,
-              collectedPieces: imgObj.collectedPieces
-            });
-          }
+            if (chrome.runtime && chrome.runtime.sendMessage) {
+              chrome.runtime.sendMessage({
+                type: 'PIECE_COLLECTED',
+                imageIndex: imgIdx,
+                pieceIndex: pieceIdx,
+                collectedPieces: imgObj.collectedPieces
+              });
+            }
+          } catch (_) {}
           
           // Check if puzzle is complete
           const rows = imgObj.puzzleRows || imgObj.gridSize || 3;

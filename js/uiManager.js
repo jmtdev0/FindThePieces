@@ -460,7 +460,22 @@ class UIManager {
         const backBtn = document.createElement('button');
         backBtn.textContent = '← Back to Gallery';
         backBtn.className = 'back-btn';
-        backBtn.addEventListener('click', () => {
+        backBtn.addEventListener('click', async () => {
+            // Guardar de forma segura el estado actual del puzzle antes de salir
+            try {
+                if (window.findThePiecesApp && typeof window.findThePiecesApp.updateImageSilent === 'function') {
+                    await window.findThePiecesApp.updateImageSilent(idx, {
+                        puzzleState: imgObj && imgObj.puzzleState,
+                        completed: !!(imgObj && imgObj.completed),
+                        completedAt: imgObj && imgObj.completedAt
+                    });
+                } else if (window.storageManager && typeof window.storageManager.saveImages === 'function') {
+                    window.storageManager.saveImages(window.allImages);
+                }
+            } catch (err) {
+                console.warn('Back to Gallery persist failed, attempting fallback:', err);
+                try { window.storageManager && window.storageManager.saveImages && window.storageManager.saveImages(window.allImages); } catch (e) {}
+            }
             // Limpiar listener de teclado
             if (window.currentKeyboardHandler) {
                 document.removeEventListener('keydown', window.currentKeyboardHandler);
@@ -985,8 +1000,43 @@ class UIManager {
         gridWrapper.appendChild(grid);
         container.appendChild(gridWrapper);
 
+        // Debounced persistence for rapid keyboard moves to avoid excessive IO
+        let __persistDebounceTimer = null;
+        const __persistDelayMs = 1000; // save 1s after last move
+        const __persistImmediate = () => {
+            try {
+                if (window.findThePiecesApp && typeof window.findThePiecesApp.updateImageSilent === 'function') {
+                    window.findThePiecesApp.updateImageSilent(idx, {
+                        puzzleState: puzzleState,
+                        completed: imgObj.completed,
+                        completedAt: imgObj.completedAt
+                    });
+                } else if (window.storageManager && typeof window.storageManager.saveImages === 'function') {
+                    window.storageManager.saveImages(window.allImages);
+                }
+            } catch (err) {
+                try {
+                    window.storageManager && window.storageManager.saveImages && window.storageManager.saveImages(window.allImages);
+                } catch (e) {
+                    console.warn('Persist failed:', err || e);
+                }
+            }
+        };
+        const __schedulePersist = () => {
+            if (__persistDebounceTimer) clearTimeout(__persistDebounceTimer);
+            __persistDebounceTimer = setTimeout(__persistImmediate, __persistDelayMs);
+        };
+        const __persist = (immediate = false) => {
+            if (immediate) {
+                if (__persistDebounceTimer) { clearTimeout(__persistDebounceTimer); __persistDebounceTimer = null; }
+                __persistImmediate();
+            } else {
+                __schedulePersist();
+            }
+        };
+
         
-        // Manejador de teclado para el puzzle
+    // Manejador de teclado para el puzzle
     keyboardHandler = (e) => {
             // Solo procesar si hay una celda seleccionada
             if (selectedIdx === null) return;
@@ -1036,16 +1086,14 @@ class UIManager {
                     if (imgObj.completed && !imgObj.completedAt) {
                         imgObj.completedAt = new Date().toISOString();
                     }
-                    if (window.findThePiecesApp) {
-                        window.findThePiecesApp.updateImageSilent(idx, { 
-                            puzzleState: puzzleState,
-                            completed: imgObj.completed,
-                            completedAt: imgObj.completedAt
-                        });
-                    }
+            // Debounced persistence: save after a pause; but flush immediately on completion state changes
+            const shouldPersistImmediate = !!isCompletedKB || (prevCompletedKB && !imgObj.completed);
+            __persist(shouldPersistImmediate);
 
                     if (prevCompletedKB && !imgObj.completed) {
                         try {
+                // Ensure state is saved before re-rendering after un-completing
+                __persist(true);
                             const newPuzzleData = window.puzzleManager && window.puzzleManager.initializePuzzle ? window.puzzleManager.initializePuzzle(imgObj, idx) : { rows: rows, cols: cols, totalPieces: totalPieces };
                             this.renderDetailView(imgObj, idx, newPuzzleData);
                             return;
@@ -1076,6 +1124,8 @@ class UIManager {
                             // Remover listener cuando se completa
                             document.removeEventListener('keydown', keyboardHandler);
                             
+                                    // Persist immediately on completion before UI effects
+                                    __persist(true);
                                     // Reproducir sonido y mostrar popup de felicitación
                                     this.playCompletionSound();
                                     this.showCongratulationsPopup(imgObj, idx);

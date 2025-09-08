@@ -42,4 +42,8 @@ Sonidito ligero al coger la pieza
 -- Puzle de 100 piezas
 -- Desactivar los console.log
 Poder hacer zoom en la foto
--- Hacer las líneas del puzle más finas
+-- Hacer las líneas del puzle más finas en puzles de muchas piezas
+
+-- Rendimiento. Solo trabajar con las pestañas con las que interactúe el usuario maybe en vez de notificar a todas
+
+
