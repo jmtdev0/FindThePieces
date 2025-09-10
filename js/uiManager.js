@@ -1,7 +1,7 @@
 // uiManager.js
 // Manejo de la interfaz de usuario y renderizado
 // Debug helper for puzzle interactions
-const PUZZLE_DEBUG = true;
+const PUZZLE_DEBUG = false;
 function puzzleDebug(...args) {
     if (PUZZLE_DEBUG && typeof console !== 'undefined' && console.log) {
         try { console.log('[FindThePieces][Puzzle]', ...args); } catch (_) {}
@@ -456,25 +456,77 @@ class UIManager {
     renderDetailView(imgObj, idx, puzzleData) {
         const { rows, cols, totalPieces } = puzzleData;
         
+        // Shared fullscreen loader helpers (used by Save and Back to Gallery)
+        const showFullScreenLoader = (text = 'Saving…') => {
+            const existing = document.getElementById('puzzle-fullscreen-loader');
+            if (existing) return existing;
+            const overlay = document.createElement('div');
+            overlay.id = 'puzzle-fullscreen-loader';
+            overlay.setAttribute('aria-live', 'polite');
+            overlay.style.cssText = `
+                position: fixed; inset: 0; z-index: 2147483647;
+                background: rgba(0,0,0,0.45);
+                display: flex; align-items: center; justify-content: center;
+                backdrop-filter: blur(1px);
+            `;
+            overlay.innerHTML = `
+                <div style="background:#111; color:#fff; padding:24px 28px; border-radius:14px; box-shadow:0 6px 32px rgba(0,0,0,0.35); display:flex; align-items:center; gap:14px; min-width:240px;">
+                    <div style="width:24px; height:24px; border:3px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation: fpf-spin 0.9s linear infinite;"></div>
+                    <div style="font-size:14px; font-weight:600;">${text}</div>
+                </div>
+                <style>
+                    @keyframes fpf-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                </style>
+            `;
+            document.body.appendChild(overlay);
+            return overlay;
+        };
+        const hideFullScreenLoader = () => {
+            const overlay = document.getElementById('puzzle-fullscreen-loader');
+            if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        };
+        // Expose helpers globally to avoid scope issues inside async handlers
+        try {
+            window.__ftpShowLoader = showFullScreenLoader;
+            window.__ftpHideLoader = hideFullScreenLoader;
+        } catch (_) {}
+        
         // Crear botón de regreso
         const backBtn = document.createElement('button');
         backBtn.textContent = '← Back to Gallery';
         backBtn.className = 'back-btn';
         backBtn.addEventListener('click', async () => {
-            // Guardar de forma segura el estado actual del puzzle antes de salir
-            try {
-                if (window.findThePiecesApp && typeof window.findThePiecesApp.updateImageSilent === 'function') {
-                    await window.findThePiecesApp.updateImageSilent(idx, {
-                        puzzleState: imgObj && imgObj.puzzleState,
-                        completed: !!(imgObj && imgObj.completed),
-                        completedAt: imgObj && imgObj.completedAt
-                    });
-                } else if (window.storageManager && typeof window.storageManager.saveImages === 'function') {
-                    window.storageManager.saveImages(window.allImages);
+            // Always keep disabled until *after* navigation so we don't double-trigger.
+            backBtn.disabled = true;
+            const movedFlag = (typeof this.movedSinceOpen !== 'undefined') ? this.movedSinceOpen : (window.__ftpMovedSinceOpen || false);
+            if (imgObj && imgObj.completed) {
+                // Completed: no save needed.
+            } else if (!movedFlag) {
+                // No moves this session: skip save.
+            } else {
+                // Perform save with loader; do not navigate until fully finished.
+                if (window.__ftpShowLoader) window.__ftpShowLoader('Saving…');
+                await new Promise((r) => requestAnimationFrame(() => r()));
+                const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                try {
+                    if (window.findThePiecesApp && typeof window.findThePiecesApp.updateImageSilent === 'function') {
+                        await window.findThePiecesApp.updateImageSilent(idx, {
+                            puzzleState: imgObj && imgObj.puzzleState,
+                            completed: !!(imgObj && imgObj.completed),
+                            completedAt: imgObj && imgObj.completedAt
+                        });
+                    } else if (window.storageManager && typeof window.storageManager.saveImages === 'function') {
+                        window.storageManager.saveImages(window.allImages);
+                    }
+                } catch (err) {
+                    console.warn('Back to Gallery persist failed, attempting fallback:', err);
+                    try { window.storageManager && window.storageManager.saveImages && window.storageManager.saveImages(window.allImages); } catch (e) {}
+                } finally {
+                    const end = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                    const elapsed = end - start;
+                    if (elapsed < 400) { await new Promise((r) => setTimeout(r, 400 - elapsed)); }
+                    if (window.__ftpHideLoader) window.__ftpHideLoader();
                 }
-            } catch (err) {
-                console.warn('Back to Gallery persist failed, attempting fallback:', err);
-                try { window.storageManager && window.storageManager.saveImages && window.storageManager.saveImages(window.allImages); } catch (e) {}
             }
             // Limpiar listener de teclado
             if (window.currentKeyboardHandler) {
@@ -505,6 +557,8 @@ class UIManager {
 
             window.puzzleManager.cleanup();
             this.renderPreviews();
+            // Re-enable after navigation/render completes
+            backBtn.disabled = false;
         });
 
         // Limpiar contenedor y configurarlo para centrado
@@ -548,6 +602,10 @@ class UIManager {
             // The scramble button is rendered directly under the .detail-title inside renderPuzzleGrid
         }
         
+        // Track whether any piece has been moved during this detail session.
+        // This prevents unnecessary saves when the user simply opens and closes the detail view.
+        try { this.movedSinceOpen = false; } catch (_) { window.__ftpMovedSinceOpen = false; }
+
         if (collected.length > 0) {
             this.renderPuzzleGrid(imgObj, idx, puzzleData, puzzleContainer);
         } else {
@@ -580,7 +638,7 @@ class UIManager {
         title.style.marginBottom = '16px';
         container.appendChild(title);
 
-        // If puzzle is completed, render a single "Scramble pieces" button directly under the title
+    // If puzzle is completed, render a single "Scramble pieces" button directly under the title
         try {
             if (imgObj.completed) {
                 const titleScramble = document.createElement('button');
@@ -656,6 +714,76 @@ class UIManager {
             console.error('Error adding scramble button under title:', err);
         }
         
+    // If the puzzle is NOT completed, show a small "Guardar" button under the title
+        try {
+            if (!imgObj.completed) {
+                const saveBtn = document.createElement('button');
+                saveBtn.id = 'save-puzzle-button';
+                saveBtn.textContent = 'Save';
+                saveBtn.title = 'Save the current puzzle\'s pieces positions';
+                saveBtn.setAttribute('aria-label', 'Save puzzle');
+                saveBtn.style.cssText = `
+                    background: linear-gradient(180deg, #b2d900 0%, #9bc000 100%);
+                    color: #1a1a1a;
+                    border: 1px solid #7ea300;
+                    padding: 8px 14px;
+                    border-radius: 10px;
+                    cursor: pointer;
+                    font-size: 13px;
+                    margin: 8px auto 12px auto;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.10);
+                    transition: transform 0.12s ease, box-shadow 0.12s ease;
+                    display: inline-block;
+                `;
+                saveBtn.addEventListener('mouseenter', () => {
+                    saveBtn.style.transform = 'translateY(-1px)';
+                    saveBtn.style.boxShadow = '0 4px 10px rgba(178,217,0,0.25)';
+                });
+                saveBtn.addEventListener('mouseleave', () => {
+                    saveBtn.style.transform = '';
+                    saveBtn.style.boxShadow = '0 1px 3px rgba(0,0,0,0.10)';
+                });
+
+                saveBtn.addEventListener('click', async () => {
+                    saveBtn.disabled = true;
+                    const overlay = window.__ftpShowLoader ? window.__ftpShowLoader('Saving…') : null;
+                    // Yield a frame so the overlay actually paints before heavy work
+                    await new Promise((r) => requestAnimationFrame(() => r()));
+                    const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                    try {
+                        // Ensure we persist the latest state
+                        try {
+                            if (window.findThePiecesApp && typeof window.findThePiecesApp.updateImageSilent === 'function') {
+                                await window.findThePiecesApp.updateImageSilent(idx, {
+                                    puzzleState: Array.isArray(imgObj.puzzleState) ? imgObj.puzzleState : puzzleState,
+                                    completed: !!imgObj.completed,
+                                    completedAt: imgObj.completedAt
+                                });
+                            } else if (window.storageManager && typeof window.storageManager.saveImages === 'function') {
+                                window.storageManager.saveImages(window.allImages);
+                            }
+                        } catch (e) {
+                            // Fallback persist
+                            try { window.storageManager && window.storageManager.saveImages && window.storageManager.saveImages(window.allImages); } catch (_) {}
+                        }
+                    } finally {
+                        // Keep overlay at least 400ms so user perceives the save feedback
+                        const end = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                        const elapsed = end - start;
+                        if (elapsed < 400) {
+                            await new Promise((r) => setTimeout(r, 400 - elapsed));
+                        }
+                        if (window.__ftpHideLoader) window.__ftpHideLoader();
+                        saveBtn.disabled = false;
+                    }
+                });
+
+                title.parentNode && title.parentNode.insertBefore(saveBtn, title.nextSibling);
+            }
+        } catch (err) {
+            console.error('Error adding save button under title:', err);
+        }
+        
         // Crear contenedor del grid centrado
         const gridWrapper = document.createElement('div');
         gridWrapper.style.display = 'flex';
@@ -696,6 +824,23 @@ class UIManager {
     let selectedIdx = null;
     let puzzleState = [];
     let keyboardHandler = null;
+    
+    // Persist helper: save immediately using the available mechanism
+    const persistNow = async () => {
+        try {
+            if (window.findThePiecesApp && typeof window.findThePiecesApp.updateImageSilent === 'function') {
+                await window.findThePiecesApp.updateImageSilent(idx, {
+                    puzzleState: puzzleState,
+                    completed: !!imgObj.completed,
+                    completedAt: imgObj.completedAt
+                });
+            } else if (window.storageManager && typeof window.storageManager.saveImages === 'function') {
+                window.storageManager.saveImages(window.allImages);
+            }
+        } catch (err) {
+            try { window.storageManager && window.storageManager.saveImages && window.storageManager.saveImages(window.allImages); } catch (_) {}
+        }
+    };
         
         // Inicializar estado del puzzle
         if (imgObj.puzzleState && imgObj.puzzleState.length === totalPieces) {
@@ -779,43 +924,7 @@ class UIManager {
                 cell.style.background = '#f0f8ff';
                 cell.style.cursor = 'grab';
                 
-        // Añadir funcionalidad de click (solo selección para movimiento con teclado)
-                cell.addEventListener('click', (ev) => {
-                    const clickedPiece = puzzleState[i];
-                    if (clickedPiece !== null) {
-                        puzzleDebug(`Click en pieza ${clickedPiece} (celda ${i})${selectedCell ? ' con selección previa' : ''}`, { cellIndex: i, pieceIndex: clickedPiece, hadSelection: !!selectedCell });
-                    }
-                    if (selectedCell === cell) {
-                        // Deseleccionar si se hace click en la misma pieza
-                        selectedCell.style.border = '1px solid #ddd';
-                        selectedCell.style.zIndex = '';
-                        selectedCell = null;
-                        selectedIdx = null;
-                        puzzleDebug(`Deseleccionar pieza ${clickedPiece} (celda ${i})`, { cellIndex: i, pieceIndex: clickedPiece });
-                    } else if (selectedCell === null) {
-                        // Seleccionar si no hay nada seleccionado
-                        selectedCell = cell;
-                        selectedIdx = i;
-                        cell.style.border = '3px solid #b2d900';
-                        cell.style.zIndex = '10';
-                        puzzleDebug(`Seleccionar pieza ${clickedPiece} (celda ${i})`, { cellIndex: i, pieceIndex: clickedPiece });
-                    } else {
-            // Si hay otra pieza seleccionada y se hace click en una pieza diferente,
-            // cambiar el foco a la nueva pieza (no intercambiar ni mover)
-                        if (puzzleState[i] !== null) {
-                            // Quitar selección de la pieza anterior
-                            selectedCell.style.border = '1px solid #ddd';
-                            selectedCell.style.zIndex = '';
-                            
-                            // Seleccionar la nueva pieza
-                            selectedCell = cell;
-                            selectedIdx = i;
-                            cell.style.border = '3px solid #b2d900';
-                            cell.style.zIndex = '10';
-                            puzzleDebug(`Cambiar selección a pieza ${clickedPiece} (celda ${i})`, { newCellIndex: i, pieceIndex: clickedPiece });
-            }
-                    }
-                });
+                // Click handler is now unified below for all cells
 
                 
                 // Simple drag & drop implementation using HTML5 drag API
@@ -849,13 +958,53 @@ class UIManager {
                 if (puzzleState[i] === null) {
                     cell.style.background = '#f5f5f5';
                     cell.style.cursor = 'pointer';
-                    
-                    // Empty cells don't respond to clicks but can accept drops
-                    cell.addEventListener('click', (ev) => {
-                        // No action on empty cell click
-                    });
+                    // Click handler is now unified below for all cells
                 }
             }
+            
+            // Unificar click para TODAS las celdas: resolvemos índice y estado en tiempo de evento
+            // Esto evita cierres obsoletos y asegura que una celda que antes estaba vacía
+            // pero ahora contiene una pieza sea seleccionable.
+            cell.addEventListener('click', (ev) => {
+                // Determinar la celda actual del evento
+                const currentCell = (ev.target && ev.target.closest)
+                    ? ev.target.closest('.puzzle-cell')
+                    : cell;
+                if (!currentCell) return;
+                const idx = parseInt(currentCell.dataset.index);
+                const clickedPiece = puzzleState[idx];
+
+                // Si la celda está vacía, no hacemos nada (mantenemos el comportamiento actual)
+                if (clickedPiece === null) {
+                    return;
+                }
+
+                // Log útil
+                puzzleDebug(`Click en pieza ${clickedPiece} (celda ${idx})${selectedCell ? ' con selección previa' : ''}`, {
+                    cellIndex: idx,
+                    pieceIndex: clickedPiece,
+                    hadSelection: !!selectedCell
+                });
+
+                // Toggle/dar foco a la selección
+                if (selectedCell === currentCell) {
+                    // Deseleccionar
+                    try { selectedCell.style.border = '1px solid #ddd'; selectedCell.style.zIndex = ''; } catch (_) {}
+                    selectedCell = null;
+                    selectedIdx = null;
+                    puzzleDebug(`Deseleccionar pieza ${clickedPiece} (celda ${idx})`, { cellIndex: idx, pieceIndex: clickedPiece });
+                    return;
+                }
+
+                // Cambiar foco de selección a esta celda con pieza
+                if (selectedCell) {
+                    try { selectedCell.style.border = '1px solid #ddd'; selectedCell.style.zIndex = ''; } catch (_) {}
+                }
+                selectedCell = currentCell;
+                selectedIdx = idx;
+                try { currentCell.style.border = '3px solid #b2d900'; currentCell.style.zIndex = '10'; } catch (_) {}
+                puzzleDebug(`Seleccionar pieza ${clickedPiece} (celda ${idx})`, { cellIndex: idx, pieceIndex: clickedPiece });
+            });
             
             // Add drop handlers to all cells (both empty and with pieces)
             cell.addEventListener('dragover', (ev) => {
@@ -916,7 +1065,7 @@ class UIManager {
                     puzzleDebug(`Mover: pieza ${fromPiece} a celda vacía ${toIdx}`);
                 }
                 
-                // Check completion and persist
+                // Check completion (only persist if just completed)
                 const isCompletedNow = this.checkPuzzleCompletion(puzzleState, totalPieces);
                 imgObj.puzzleState = [...puzzleState];
                 imgObj.completed = !!isCompletedNow;
@@ -924,13 +1073,14 @@ class UIManager {
                     imgObj.completedAt = new Date().toISOString();
                 }
                 
-                if (window.findThePiecesApp) {
-                    window.findThePiecesApp.updateImageSilent(idx, {
-                        puzzleState: puzzleState,
-                        completed: imgObj.completed,
-                        completedAt: imgObj.completedAt
-                    });
-                    puzzleDebug(`Estado persistido. ¿Completado?: ${imgObj.completed ? 'sí' : 'no'}`);
+                // If the move completes the puzzle now, we will show celebration first
+                // and persist afterwards so the user sees the UI immediately.
+                if (isCompletedNow && !prevCompleted) {
+                    // mark moved flag now
+                    try { this.movedSinceOpen = true; } catch (_) { window.__ftpMovedSinceOpen = true; }
+                } else {
+                    // For regular moves that don't complete the puzzle, mark moved flag as well
+                    try { this.movedSinceOpen = true; } catch (_) { window.__ftpMovedSinceOpen = true; }
                 }
                 
                 // Handle completion
@@ -947,22 +1097,28 @@ class UIManager {
                 }
                 
                 if (isCompletedNow) {
-                    setTimeout(() => {
+                    setTimeout(async () => {
                         grid.style.animation = 'pulse 0.5s ease-in-out 3';
                         grid.style.boxShadow = '0 0 20px #b2d900';
                         if (keyboardHandler) { 
                             document.removeEventListener('keydown', keyboardHandler); 
                         }
-                        this.playCompletionSound();
-                        this.showCongratulationsPopup(imgObj, idx);
-                        puzzleDebug('Puzzle completado por drag & drop');
                         try {
-                            const newPuzzleData = window.puzzleManager && window.puzzleManager.initializePuzzle 
-                                ? window.puzzleManager.initializePuzzle(imgObj, idx) 
-                                : { rows: rows, cols: cols, totalPieces: totalPieces };
-                            this.renderDetailView(imgObj, idx, newPuzzleData);
-                        } catch (reErr) { 
-                            console.error('Error re-rendering after completion:', reErr); 
+                            this.playCompletionSound();
+                            this.showCongratulationsPopup(imgObj, idx);
+                            puzzleDebug('Puzzle completado por drag & drop');
+                            // Persist after showing celebration (fire-and-forget)
+                            try { await persistNow(); } catch (_) {}
+                            try {
+                                const newPuzzleData = window.puzzleManager && window.puzzleManager.initializePuzzle 
+                                    ? window.puzzleManager.initializePuzzle(imgObj, idx) 
+                                    : { rows: rows, cols: cols, totalPieces: totalPieces };
+                                this.renderDetailView(imgObj, idx, newPuzzleData);
+                            } catch (reErr) { 
+                                console.error('Error re-rendering after completion:', reErr); 
+                            }
+                        } catch (e) {
+                            console.error('Error during completion celebration (drag/drop):', e);
                         }
                     }, 200);
                 }
@@ -1000,40 +1156,9 @@ class UIManager {
         gridWrapper.appendChild(grid);
         container.appendChild(gridWrapper);
 
-        // Debounced persistence for rapid keyboard moves to avoid excessive IO
-        let __persistDebounceTimer = null;
-        const __persistDelayMs = 1000; // save 1s after last move
-        const __persistImmediate = () => {
-            try {
-                if (window.findThePiecesApp && typeof window.findThePiecesApp.updateImageSilent === 'function') {
-                    window.findThePiecesApp.updateImageSilent(idx, {
-                        puzzleState: puzzleState,
-                        completed: imgObj.completed,
-                        completedAt: imgObj.completedAt
-                    });
-                } else if (window.storageManager && typeof window.storageManager.saveImages === 'function') {
-                    window.storageManager.saveImages(window.allImages);
-                }
-            } catch (err) {
-                try {
-                    window.storageManager && window.storageManager.saveImages && window.storageManager.saveImages(window.allImages);
-                } catch (e) {
-                    console.warn('Persist failed:', err || e);
-                }
-            }
-        };
-        const __schedulePersist = () => {
-            if (__persistDebounceTimer) clearTimeout(__persistDebounceTimer);
-            __persistDebounceTimer = setTimeout(__persistImmediate, __persistDelayMs);
-        };
-        const __persist = (immediate = false) => {
-            if (immediate) {
-                if (__persistDebounceTimer) { clearTimeout(__persistDebounceTimer); __persistDebounceTimer = null; }
-                __persistImmediate();
-            } else {
-                __schedulePersist();
-            }
-        };
+    // Persistence policy: do not persist after each move.
+    // We only persist when the puzzle is completed, when the user returns to the gallery,
+    // or when the tab/page becomes hidden or is closed.
 
         
     // Manejador de teclado para el puzzle
@@ -1076,6 +1201,9 @@ class UIManager {
                         puzzleState[selectedIdx] = null;
                         puzzleDebug(`Mover (teclado): pieza ${fromPieceKB} de celda ${originalSelectedIdx} a celda ${originalTargetIdx} (vacía)`, { fromIdx: originalSelectedIdx, toIdx: originalTargetIdx, pieceIndex: fromPieceKB });
                     }
+
+                    // Marcar que hubo movimiento en esta sesión (independiente de si completa el puzzle)
+                    try { this.movedSinceOpen = true; } catch (_) { window.__ftpMovedSinceOpen = true; }
                     
                     // Verificar si el puzzle está completo
                     const isCompletedKB = this.checkPuzzleCompletion(puzzleState, totalPieces);
@@ -1086,14 +1214,15 @@ class UIManager {
                     if (imgObj.completed && !imgObj.completedAt) {
                         imgObj.completedAt = new Date().toISOString();
                     }
-            // Debounced persistence: save after a pause; but flush immediately on completion state changes
-            const shouldPersistImmediate = !!isCompletedKB || (prevCompletedKB && !imgObj.completed);
-            __persist(shouldPersistImmediate);
+            // Persist only on completion (not on regular moves)
+            if (isCompletedKB && !prevCompletedKB) {
+                // We'll persist after showing the celebration so the user sees the popup first.
+                // Mark moved flag immediately.
+                try { this.movedSinceOpen = true; } catch (_) { window.__ftpMovedSinceOpen = true; }
+            }
 
                     if (prevCompletedKB && !imgObj.completed) {
                         try {
-                // Ensure state is saved before re-rendering after un-completing
-                __persist(true);
                             const newPuzzleData = window.puzzleManager && window.puzzleManager.initializePuzzle ? window.puzzleManager.initializePuzzle(imgObj, idx) : { rows: rows, cols: cols, totalPieces: totalPieces };
                             this.renderDetailView(imgObj, idx, newPuzzleData);
                             return;
@@ -1101,7 +1230,6 @@ class UIManager {
                             console.error('Error re-rendering after un-complete move (keyboard):', reErr);
                         }
                     }
-                    puzzleDebug(`Estado persistido tras teclado. ¿Completado?: ${imgObj.completed ? 'sí' : 'no'}`, { completed: imgObj.completed });
                     
                     // Actualizar las celdas afectadas (usar índices originales)
                     this.updatePuzzleCells(grid, puzzleState, imgObj, rows, cols, originalSelectedIdx, originalTargetIdx);
@@ -1118,24 +1246,28 @@ class UIManager {
                     
                     // Efecto visual de completado
                     if (isCompletedKB) {
-                        setTimeout(() => {
+                        setTimeout(async () => {
                             grid.style.animation = 'pulse 0.5s ease-in-out 3';
                             grid.style.boxShadow = '0 0 20px #b2d900';
                             // Remover listener cuando se completa
                             document.removeEventListener('keydown', keyboardHandler);
                             
-                                    // Persist immediately on completion before UI effects
-                                    __persist(true);
-                                    // Reproducir sonido y mostrar popup de felicitación
-                                    this.playCompletionSound();
-                                    this.showCongratulationsPopup(imgObj, idx);
-                                    puzzleDebug('Puzzle completado por teclado');
-                                    try {
-                                        const newPuzzleData = window.puzzleManager && window.puzzleManager.initializePuzzle ? window.puzzleManager.initializePuzzle(imgObj, idx) : { rows: rows, cols: cols, totalPieces: totalPieces };
-                                        this.renderDetailView(imgObj, idx, newPuzzleData);
-                                    } catch (reErr) {
-                                        console.error('Error re-rendering detail after completion popup (keyboard):', reErr);
-                                    }
+                            // Play celebration UI first, then persist in background so user sees it immediately.
+                            try {
+                                this.playCompletionSound();
+                                this.showCongratulationsPopup(imgObj, idx);
+                                puzzleDebug('Puzzle completado por teclado');
+                                // Persist after showing celebration (don't await UI dismissal)
+                                try { await persistNow(); } catch (_) {}
+                                try {
+                                    const newPuzzleData = window.puzzleManager && window.puzzleManager.initializePuzzle ? window.puzzleManager.initializePuzzle(imgObj, idx) : { rows: rows, cols: cols, totalPieces: totalPieces };
+                                    this.renderDetailView(imgObj, idx, newPuzzleData);
+                                } catch (reErr) {
+                                    console.error('Error re-rendering detail after completion popup (keyboard):', reErr);
+                                }
+                            } catch (e) {
+                                console.error('Error during completion celebration (keyboard):', e);
+                            }
                         }, 200);
                     }
                 }
@@ -1149,6 +1281,23 @@ class UIManager {
         window.currentKeyboardHandler = keyboardHandler;
         document.addEventListener('keydown', keyboardHandler);
         
+        // Persist on tab close or leave/hidden events
+        if (window.__puzzlePersistCleanup) {
+            try { window.__puzzlePersistCleanup(); } catch (_) {}
+        }
+        const __visibilityHandler = () => {
+            if (document.hidden) { persistNow(); }
+        };
+        const __pageHideHandler = () => { persistNow(); };
+        document.addEventListener('visibilitychange', __visibilityHandler);
+        window.addEventListener('pagehide', __pageHideHandler);
+        window.addEventListener('beforeunload', __pageHideHandler);
+        window.__puzzlePersistCleanup = () => {
+            document.removeEventListener('visibilitychange', __visibilityHandler);
+            window.removeEventListener('pagehide', __pageHideHandler);
+            window.removeEventListener('beforeunload', __pageHideHandler);
+        };
+
         // Mensaje de estado
     const statusMsg = document.createElement('div');
     statusMsg.id = 'puzzle-status-msg';

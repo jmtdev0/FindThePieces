@@ -24,6 +24,17 @@
   const tabImageEligibility = new Map();
   // Per-image paused state when a piece is already visible in this tab
   const perImagePausedDueToVisible = new Set();
+  // Per-tab per-image collected count (only counts local clicks in this tab)
+  const perTabCollectedCounts = new Map(); // imageIndex -> count
+
+  function getCollectedCountForTab(imgIdx) {
+    try { return perTabCollectedCounts.get(imgIdx) || 0; } catch (_) { return 0; }
+  }
+  function incrementCollectedCountForTab(imgIdx) {
+    const next = getCollectedCountForTab(imgIdx) + 1;
+    try { perTabCollectedCounts.set(imgIdx, next); } catch (_) {}
+    return next;
+  }
 
   // Debug logging control
   // Toggle this to enable/disable console output from this content script
@@ -56,17 +67,24 @@
   // - If freq <= 1 => p = 1
   // - If freq >= 100 => p = 0.01 (exception)
   // - Else p = 1 - (freq / 100)
-  function probabilityFromFrequency(freq) {
+  // mode: 'eligibility' (default) uses base/2, 'attempt' uses base/3
+  function probabilityFromFrequency(freq, mode = 'eligibility') {
   const f = (typeof freq === 'number' && isFinite(freq)) ? freq : 5;
   // Keep the exceptional rule: frequency 1 always yields probability 1
   if (f <= 1) return 1;
   // Preserve an upper frequency guard to avoid nonsensical inputs
   if (f >= 100) return 0.01;
 
-  // Original mapping: p = 1 - (f / 100)
-  // New requirement: reduce probability to half of the original
+  // Original mapping: base = 1 - (f / 100)
   const base = 1 - (f / 100);
-  let p = base / 2;
+  let p;
+  if (mode === 'attempt') {
+    // per-attempt show: reduce to one third of original
+    p = base / 3;
+  } else {
+    // eligibility (tab-level): keep half
+    p = base;
+  }
   // Guard tiny numerical drift and keep within [0.01, 1]
   if (p < 0.01) return 0.01;
   if (p > 1) return 1;
@@ -120,17 +138,28 @@
       try { perImageFreqs.set(imgIdx, initialFreq); } catch (e) {}
     }
 
-    const attemptFn = function tryLaunch() {
+  const attemptFn = function tryLaunch() {
       if (!showPieces || extensionInvalid) return;
       // If we've reached max simultaneous pieces, defer next attempt
       const visibleCount = getVisiblePieces().length;
       if (visibleCount >= MAX_SIMULTANEOUS_PIECES) {
         try { console.log('[FTP contentScript][img', imgIdx, '] Intento diferido: límite simultáneo alcanzado -> visibles =', visibleCount); } catch (e) {}
-        // retry after 1s
-        try { const prev = perImageTimeouts.get(imgIdx); if (prev) clearTimeout(prev); } catch (e) {}
-        perImageTimeouts.set(imgIdx, setTimeout(tryLaunch, 1000));
+  // retry after 7s
+  try { const prev = perImageTimeouts.get(imgIdx); if (prev) clearTimeout(prev); } catch (e) {}
+  perImageTimeouts.set(imgIdx, setTimeout(tryLaunch, 7000));
         return;
       }
+
+      // Cap rule: if freq>50 and this tab already collected 5 pieces for this image, stop scheduling in this tab
+      try {
+        const fNowCap = (perImageFreqs.has(imgIdx) ? perImageFreqs.get(imgIdx) : ((img && typeof img.frequency === 'number' && img.frequency > 0) ? img.frequency : 5));
+        if (fNowCap > 50 && getCollectedCountForTab(imgIdx) >= 5) {
+          try { const prevCap = perImageTimeouts.get(imgIdx); if (prevCap) clearTimeout(prevCap); } catch (e) {}
+          perImageTimeouts.delete(imgIdx);
+          try { console.log('[FTP contentScript][img', imgIdx, '] Cap aplicado: 5 piezas ya recogidas en esta pestaña (freq>50).'); } catch (e) {}
+          return;
+        }
+      } catch (e) {}
 
       // If this tab is not eligible for this image, skip
       if (!decideEligibilityForImage(img, imgIdx)) {
@@ -154,7 +183,7 @@
 
   // Compute chance based on current image frequency (may have been updated via messages)
   const freqNow = (perImageFreqs.has(imgIdx) ? perImageFreqs.get(imgIdx) : ((img && typeof img.frequency === 'number' && img.frequency > 0) ? img.frequency : 5));
-  const p = probabilityFromFrequency(freqNow);
+  const p = probabilityFromFrequency(freqNow, 'attempt');
       const r = Math.random();
       try { console.log('[FTP contentScript][img', imgIdx, `] Cálculo aleatorio: freq=${freqNow} -> p=${p.toFixed(3)}; r=${r.toFixed(3)} =>`, (r < p ? 'Se muestra' : 'No se muestra')); } catch (e) {}
       if (r < p) {
@@ -192,6 +221,8 @@
                   // pass the fresh image object and the current frequency to showPiece so widths/collected state are up-to-date
                   const sendFreq = (perImageFreqs.has(imgIdx) ? perImageFreqs.get(imgIdx) : initialFreq);
                   try { console.log('[FTP contentScript][img', imgIdx, '] Mostrar pieza seleccionada:', pieceIdx, 'entre', availablePieces.length, 'disponibles'); } catch (e) {}
+                  // Guard: if cap reached exactly after last collection, skip showing
+                  try { if (sendFreq > 50 && getCollectedCountForTab(imgIdx) >= 5) { shouldReschedule = false; stopImageScheduler(imgIdx); return; } } catch (e) {}
                   showPiece({ img: freshImg, imgIdx, pieceIdx, frequency: sendFreq, rows, cols });
                 } else {
                   // no pieces left -> stop scheduler for this image and do not reschedule
@@ -205,26 +236,26 @@
                 // schedule next attempt after async handling
                 if (shouldReschedule) {
                   try { const prev = perImageTimeouts.get(imgIdx); if (prev) clearTimeout(prev); } catch (e) {}
-                  perImageTimeouts.set(imgIdx, setTimeout(tryLaunch, 1000));
+                  perImageTimeouts.set(imgIdx, setTimeout(tryLaunch, 7000));
                 }
               }
             }) :
             // storage not available; fallback: schedule next attempt or mark invalid
-            perImageTimeouts.set(imgIdx, setTimeout(tryLaunch, 1000));
+            perImageTimeouts.set(imgIdx, setTimeout(tryLaunch, 7000));
         } catch (e) {
           // schedule next attempt on error
-          perImageTimeouts.set(imgIdx, setTimeout(tryLaunch, 1000));
+          perImageTimeouts.set(imgIdx, setTimeout(tryLaunch, 7000));
         }
       } else {
   // did not pass probability gate; schedule next attempt
-  try { console.log('[FTP contentScript][img', imgIdx, '] Resultado: No se muestra (se reintenta en 1s)'); } catch (e) {}
-        perImageTimeouts.set(imgIdx, setTimeout(tryLaunch, 1000));
+  try { console.log('[FTP contentScript][img', imgIdx, '] Resultado: No se muestra (se reintenta en 7s)'); } catch (e) {}
+        perImageTimeouts.set(imgIdx, setTimeout(tryLaunch, 7000));
       }
     };
 
-    // start first attempt after a small random delay to avoid alignment
-    const initialDelay = 500 + Math.floor(Math.random() * 1000);
-    perImageTimeouts.set(imgIdx, setTimeout(attemptFn, initialDelay));
+  // start first attempt after a small random delay to avoid alignment
+  const initialDelay = 500 + Math.floor(Math.random() * 1000);
+  perImageTimeouts.set(imgIdx, setTimeout(attemptFn, initialDelay));
   }
 
   function stopImageScheduler(imgIdx) {
@@ -246,6 +277,11 @@
   function launchPieceForImageNow(imgIdx) {
     if (extensionInvalid || !showPieces) return;
     try {
+  // Cap early exit: if freq>50 and cap reached in this tab, do not launch
+  try {
+    const fEarly = perImageFreqs.has(imgIdx) ? perImageFreqs.get(imgIdx) : 5;
+    if (fEarly > 50 && getCollectedCountForTab(imgIdx) >= 5) { return; }
+  } catch (e) {}
   // If there's already a visible piece from this image, do not show another
   try { if (document.querySelector(`.find-the-piece[data-image-index="${imgIdx}"]`)) { startImageScheduler(imgIdx, null); return; } } catch (e) {}
       // Clear any existing timer for the image so we can show immediately
@@ -282,6 +318,8 @@
               const freqNow = (freshImg && typeof freshImg.frequency === 'number' && freshImg.frequency > 0) ? freshImg.frequency : 5;
               try { perImageFreqs.set(imgIdx, freqNow); } catch (e) {}
               try { console.log('[FTP contentScript][img', imgIdx, '] Frecuencia actualizada desde storage tras recoger pieza ->', freqNow); } catch (e) {}
+              // Enforce cap right before showing
+              try { if (freqNow > 50 && getCollectedCountForTab(imgIdx) >= 5) { return; } } catch (e) {}
               showPiece({ img: freshImg, imgIdx, pieceIdx, rows, cols, frequency: freqNow });
               // Restart per-image scheduler for continued attempts
               try { startImageScheduler(imgIdx, freshImg); } catch (e) {}
@@ -356,6 +394,8 @@
       try { console.log('[FTP contentScript] eligibility override (freq=1) for image', imgIdx, '-> true'); } catch (e) {}
       return true;
     }
+  // Cap rule: if freq>50 and this tab has already collected 5 pieces for this image, treat as ineligible
+  try { if (freq > 50 && getCollectedCountForTab(imgIdx) >= 5) return false; } catch (e) {}
     if (tabImageEligibility.has(imgIdx)) return tabImageEligibility.get(imgIdx);
     const pGate = probabilityFromFrequency(freq);
     const allowed = Math.random() < pGate;
@@ -618,7 +658,7 @@
           if (availablePieces.length === 0) return;
 
           const freq = (typeof img.frequency === 'number' && img.frequency > 0) ? img.frequency : 5;
-          const p = probabilityFromFrequency(freq);
+          const p = probabilityFromFrequency(freq, 'attempt');
           if (Math.random() < p) {
             const pieceIdx = availablePieces[Math.floor(Math.random() * availablePieces.length)];
             passingCandidates.push({ img, imgIdx, pieceIdx, frequency: freq, rows, cols });
@@ -626,9 +666,9 @@
         });
 
         if (passingCandidates.length === 0) {
-          // retry after 1s
-          console.log('[FTP contentScript] no passing candidates this attempt; retrying in 1s');
-          currentTimeout = setTimeout(launchAttempt, 1000);
+          // retry after 7s
+          console.log('[FTP contentScript] no passing candidates this attempt; retrying in 7s');
+          currentTimeout = setTimeout(launchAttempt, 7000);
           return;
         }
 
@@ -638,8 +678,8 @@
       });
     };
 
-    if (currentTimeout) clearTimeout(currentTimeout);
-    currentTimeout = setTimeout(launchAttempt, 1000);
+  if (currentTimeout) clearTimeout(currentTimeout);
+  currentTimeout = setTimeout(launchAttempt, 7000);
   }
 
   function showPiece(candidate) {
@@ -772,6 +812,15 @@
       } catch (e) { try { console.warn('[FTP contentScript] failed to play collect sound (optimistic)', e); } catch (_) {} }
       try { element && element.remove && element.remove(); } catch (_) {}
 
+      // Cap tracking: increment local count immediately to avoid race with broadcast
+      try {
+        const countNow = incrementCollectedCountForTab(imgIdx);
+        const fNow = (perImageFreqs.has(imgIdx) ? perImageFreqs.get(imgIdx) : 5);
+        if (fNow > 50 && countNow === 5) {
+          try { console.log('[FTP contentScript][img', imgIdx, '] Quinta pieza recuperada en esta pestaña (freq>50). Se alcanza el límite de 5.'); } catch (e) {}
+        }
+      } catch (e) {}
+
       // Immediately notify background so all tabs can remove matching pieces without waiting for storage
       try {
         chrome.runtime && chrome.runtime.sendMessage && chrome.runtime.sendMessage({
@@ -781,7 +830,7 @@
         });
       } catch (_) {}
 
-      // Then update storage state asynchronously
+  // Then update storage state asynchronously
       chrome.storage.local.get(['findThePiecesImages', 'findThePixelsImages'], (result) => {
       // Buscar en ambas claves
       const imagesArr = result.findThePiecesImages || result.findThePixelsImages;
@@ -817,6 +866,8 @@
               });
             }
           } catch (_) {}
+
+          // Note: per-tab cap was incremented immediately upon click to avoid races
           
           // Check if puzzle is complete
           const rows = imgObj.puzzleRows || imgObj.gridSize || 3;
@@ -826,8 +877,17 @@
             // Puzzle completed
           }
           
-          // Reanudar el ciclo (sin mostrar pieza inmediata) con la frecuencia actual desde storage
+          // Reanudar el ciclo (sin mostrar pieza inmediata) con la frecuencia actual,
+          // salvo que el cap (freq>50 y 5 piezas locales) se haya alcanzado en esta pestaña
           if (showPieces) {
+            try {
+              const fNow = (perImageFreqs.has(imgIdx) ? perImageFreqs.get(imgIdx) : ((typeof imgObj.frequency === 'number' && imgObj.frequency > 0) ? imgObj.frequency : 5));
+              if (fNow > 50 && getCollectedCountForTab(imgIdx) >= 5) {
+                // Stop any pending timer and do not restart for this image in this tab
+                try { stopImageScheduler(imgIdx); } catch (_) {}
+                return;
+              }
+            } catch (e) {}
             try { perImagePausedDueToVisible.delete(imgIdx); } catch (e) {}
             try { stopImageScheduler(imgIdx); } catch (e) {}
             try { startImageScheduler(imgIdx, imgObj); } catch (e) {}

@@ -62,14 +62,27 @@ class FileUploadManager {
     }
 
     handleFiles(files) {
-        const validFiles = files.filter(file => file.type.startsWith('image/'));
-        
-        if (validFiles.length === 0) {
+        const IMAGE_MAX_BYTES = 10 * 1024 * 1024; // 10 MB limit
+        const imageFiles = files.filter(file => file.type.startsWith('image/'));
+        if (imageFiles.length === 0) {
             alert('Please select valid image files.');
             return;
         }
 
-        validFiles.forEach(file => {
+        const oversized = imageFiles.filter(f => f.size > IMAGE_MAX_BYTES);
+        const withinLimit = imageFiles.filter(f => f.size <= IMAGE_MAX_BYTES);
+
+        if (oversized.length > 0) {
+            const names = oversized.map(f => `${f.name} (${(f.size/1024/1024).toFixed(2)} MB)`).join('\n');
+            alert('The following files exceed the 10 MB limit and were skipped:\n\n' + names);
+        }
+
+        if (withinLimit.length === 0) {
+            // All candidate images were too large
+            return;
+        }
+
+        withinLimit.forEach(file => {
             const reader = new FileReader();
             reader.onload = (e) => {
                 const imageData = {
