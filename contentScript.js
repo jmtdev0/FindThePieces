@@ -26,6 +26,37 @@
   const perImagePausedDueToVisible = new Set();
   // Per-tab per-image collected count (only counts local clicks in this tab)
   const perTabCollectedCounts = new Map(); // imageIndex -> count
+  // Polling interval to check storage for externally-collected pieces
+  let collectedPollIntervalId = null;
+  // Cursor for collection events feed
+  let lastSeenFeedId = 0;
+
+  // Append a lightweight collection event into ftp_collectionFeed (keeps last 10)
+  function appendCollectionEvent(imageIndex, pieceIndex) {
+    try {
+      // Prefer notifying background to append to the feed to avoid storage I/O in the content script
+      if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+        try {
+          chrome.runtime.sendMessage({ type: 'FTP_CS_FEED_APPEND', imageIndex, pieceIndex });
+          return;
+        } catch (_) {}
+      }
+      // Fallback: append directly if runtime messaging is unavailable
+      const now = Date.now();
+      if (chrome && chrome.storage && chrome.storage.local && chrome.storage.local.get) {
+        chrome.storage.local.get(['ftp_collectionFeed', 'ftp_collectionSeq'], (res) => {
+          try {
+            const feed = Array.isArray(res.ftp_collectionFeed) ? res.ftp_collectionFeed.slice() : [];
+            const nextSeq = (typeof res.ftp_collectionSeq === 'number' ? res.ftp_collectionSeq : 0) + 1;
+            feed.push({ id: nextSeq, imageIndex, pieceIndex, ts: now });
+            // Keep only last 10 events
+            const pruned = feed.length > 10 ? feed.slice(-10) : feed;
+            chrome.storage.local.set({ ftp_collectionFeed: pruned, ftp_collectionSeq: nextSeq });
+          } catch (_) {}
+        });
+      }
+    } catch (_) {}
+  }
 
   function getCollectedCountForTab(imgIdx) {
     try { return perTabCollectedCounts.get(imgIdx) || 0; } catch (_) { return 0; }
@@ -38,7 +69,7 @@
 
   // Debug logging control
   // Toggle this to enable/disable console output from this content script
-  let IT_DEBUG = false;
+  let IT_DEBUG = true;
   // Optional: allow enabling via window.FTP_DEBUG or localStorage('FTP_DEBUG' = '1'|'true')
   try {
     if (typeof window !== 'undefined' && typeof window.FTP_DEBUG === 'boolean') {
@@ -273,6 +304,57 @@
     perImageTimeouts.clear();
   }
 
+  // Start polling every ~2 seconds to check if any visible piece was collected elsewhere (via feed)
+  function startCollectedPolling() {
+    try { if (collectedPollIntervalId) return; } catch (_) {}
+    collectedPollIntervalId = setInterval(() => {
+      try {
+        if (!showPieces) return;
+        const visible = getVisiblePieces();
+        chrome.storage && chrome.storage.local && chrome.storage.local.get && chrome.storage.local.get(['ftp_collectionFeed', 'ftp_collectionSeq'], (res) => {
+          try {
+            const feed = Array.isArray(res.ftp_collectionFeed) ? res.ftp_collectionFeed : [];
+            const newEvents = feed.filter(ev => ev && typeof ev.id === 'number' && ev.id > lastSeenFeedId);
+            if (!newEvents.length) return;
+            lastSeenFeedId = Math.max(lastSeenFeedId, ...newEvents.map(e => e.id));
+            if (!visible || !visible.length) return;
+            // Remove any visible piece that matches a new event
+            visible.forEach((node) => {
+              try {
+                const imgIdx = parseInt(node.getAttribute('data-image-index'), 10);
+                const pieceIdx = parseInt(node.getAttribute('data-piece-index'), 10);
+                if (isNaN(imgIdx) || isNaN(pieceIdx)) return;
+                if (newEvents.some(ev => ev.imageIndex === imgIdx && ev.pieceIndex === pieceIdx)) {
+                  try { node.remove(); } catch (_) {}
+                  // If no other piece from this image remains visible, restart scheduler
+                  try {
+                    const stillVisible = document.querySelector(`.find-the-piece[data-image-index="${imgIdx}"]`);
+                    if (!stillVisible) {
+                      perImagePausedDueToVisible.delete(imgIdx);
+                      // Fetch latest image to resume scheduler with authoritative state
+                      chrome.storage && chrome.storage.local && chrome.storage.local.get && chrome.storage.local.get(['findThePiecesImages', 'findThePixelsImages'], (r2) => {
+                        try {
+                          const imgs = (r2 && (r2.findThePiecesImages || r2.findThePixelsImages)) || [];
+                          const imgObj = imgs && imgs[imgIdx];
+                          if (imgObj && imgObj.puzzle) startImageScheduler(imgIdx, imgObj);
+                        } catch (_) {}
+                      });
+                    }
+                  } catch (_) {}
+                }
+              } catch (_) {}
+            });
+          } catch (_) {}
+        });
+      } catch (_) {}
+    }, 2000);
+  }
+
+  function stopCollectedPolling() {
+    try { if (collectedPollIntervalId) { clearInterval(collectedPollIntervalId); } } catch (_) {}
+    collectedPollIntervalId = null;
+  }
+
   // Show another piece from a specific image immediately (used after a piece is collected)
   function launchPieceForImageNow(imgIdx) {
     if (extensionInvalid || !showPieces) return;
@@ -387,7 +469,7 @@
   // Rule: reuse probabilityFromFrequency(freq) so eligibility matches per-second mapping.
   // If frequency missing or invalid, default to 5.
   function decideEligibilityForImage(img, imgIdx) {
-    const freq = (typeof img.frequency === 'number' && img.frequency > 0) ? img.frequency : 5;
+  const freq = (img && typeof img.frequency === 'number' && img.frequency > 0) ? img.frequency : 5;
     // Exceptional rule: if freq is exactly 1, force eligibility in this tab even if previously set to false
     if (freq === 1) {
       tabImageEligibility.set(imgIdx, true);
@@ -410,6 +492,7 @@
     console.log('[FTP contentScript] init - storage.showPieces ->', result && result.showPieces, 'effective showPieces ->', showPieces);
     if (showPieces) {
       startPieceScheduler();
+      startCollectedPolling();
     }
   // No periodic extension liveness check started (disabled by user request)
   });
@@ -427,6 +510,7 @@
           if (currentTimeout) { clearTimeout(currentTimeout); currentTimeout = null; }
         } catch (e) {}
         try { stopAllImageSchedulers(); } catch (e) {}
+        try { stopCollectedPolling(); } catch (e) {}
         try {
           document.querySelectorAll('.find-the-piece').forEach(node => { try { node.remove(); } catch (e) {} });
           console.log('[FTP contentScript] toggleContentScript -> disabled: removed displayed pieces and stopped schedulers');
@@ -434,6 +518,7 @@
       } else {
         // Start showing pieces
         startPieceScheduler();
+        startCollectedPolling();
       }
     } else if (msg && msg.type === 'PIECE_COLLECTED_GLOBAL') {
       const { imageIndex, pieceIndex } = msg;
@@ -570,10 +655,12 @@
           console.log('[FTP contentScript] showPieces disabled via storage - stopping schedulers and removing displayed pieces');
           try { if (currentTimeout) { clearTimeout(currentTimeout); currentTimeout = null; } } catch (e) {}
           try { stopAllImageSchedulers(); } catch (e) {}
+          try { stopCollectedPolling(); } catch (e) {}
           try { document.querySelectorAll('.find-the-piece').forEach(n => { try { n.remove(); } catch (e) {} }); } catch (e) {}
         } else {
           console.log('[FTP contentScript] showPieces enabled via storage - starting scheduler');
           startPieceScheduler();
+          startCollectedPolling();
         }
       }
     });
@@ -757,6 +844,7 @@
       
       el.addEventListener('click', () => {
         try { console.log('[FTP contentScript] CLICK pieza ->', { imgIdx, pieceIdx }); } catch (e) {}
+        // alert('¡Pieza recogida!'); // Local feedback
         collectPiece(imgIdx, pieceIdx, el);
       });
       
@@ -801,100 +889,69 @@
   }
 
   function collectPiece(imgIdx, pieceIdx, element) {
-      // Optimistic UI: play sound and remove the element immediately
+      const t0 = performance.now ? performance.now() : Date.now();
+      const logStep = (label) => {
+        try {
+          const now = performance.now ? performance.now() : Date.now();
+          console.log(`[FTP collectPiece][img ${imgIdx} piece ${pieceIdx}] ${label} (+${(now - t0).toFixed(2)}ms)`);
+        } catch(_) {}
+      };
+      logStep('start');
+
+      // 1. Play sound (non-blocking)
       try {
         const src = (chrome && chrome.runtime && chrome.runtime.getURL) ? chrome.runtime.getURL('sounds/pop.mp3') : 'sounds/pop.mp3';
-        // Reuse a single Audio instance could be an improvement; keep simple here
         const sfx = new Audio(src);
         try { sfx.volume = 0.6; } catch (_) {}
-        // Fire-and-forget; do not block UI
-        sfx.play().catch(() => {});
-      } catch (e) { try { console.warn('[FTP contentScript] failed to play collect sound (optimistic)', e); } catch (_) {} }
-      try { element && element.remove && element.remove(); } catch (_) {}
+        const playPromise = sfx.play();
+        if (playPromise && typeof playPromise.then === 'function') {
+          playPromise.then(() => { logStep('audio play resolved'); }).catch(() => { logStep('audio play rejected'); });
+        }
+      } catch (e) { logStep('audio exception'); }
+      logStep('after audio trigger');
 
-      // Cap tracking: increment local count immediately to avoid race with broadcast
+      // 2. Remove element optimistically
+      try { element && element.remove && element.remove(); } catch (_) {}
+      logStep('after element.remove');
+
+      // 3. Increment local cap counter
       try {
         const countNow = incrementCollectedCountForTab(imgIdx);
-        const fNow = (perImageFreqs.has(imgIdx) ? perImageFreqs.get(imgIdx) : 5);
-        if (fNow > 50 && countNow === 5) {
-          try { console.log('[FTP contentScript][img', imgIdx, '] Quinta pieza recuperada en esta pestaña (freq>50). Se alcanza el límite de 5.'); } catch (e) {}
+        const fNowLocal = (perImageFreqs.has(imgIdx) ? perImageFreqs.get(imgIdx) : 5);
+        if (fNowLocal > 50 && countNow === 5) {
+          console.log(`[FTP collectPiece][img ${imgIdx}] cap reached (5 pieces, freq>50)`);
         }
-      } catch (e) {}
+      } catch (e) { logStep('increment counter exception'); }
+      logStep('after counter increment');
 
-      // Immediately notify background so all tabs can remove matching pieces without waiting for storage
+      // 4. Append minimal event to feed (async); persistence of images is handled by main/background
       try {
-        chrome.runtime && chrome.runtime.sendMessage && chrome.runtime.sendMessage({
-          type: 'PIECE_COLLECTED',
-          imageIndex: imgIdx,
-          pieceIndex: pieceIdx
-        });
-      } catch (_) {}
+        setTimeout(() => { appendCollectionEvent(imgIdx, pieceIdx); }, 0);
+      } catch (e) { logStep('persist exception'); }
+      logStep('after schedule persist');
 
-  // Then update storage state asynchronously
-      chrome.storage.local.get(['findThePiecesImages', 'findThePixelsImages'], (result) => {
-      // Buscar en ambas claves
-      const imagesArr = result.findThePiecesImages || result.findThePixelsImages;
-      if (!imagesArr || !imagesArr[imgIdx]) return;
-      
-      const imgs = imagesArr;
-      const imgObj = imgs[imgIdx];
-      // Refresh and cache current frequency from storage at collection time
+      // 5. Cap enforcement check
       try {
-        const freshFreq = (typeof imgObj.frequency === 'number' && imgObj.frequency > 0) ? imgObj.frequency : 5;
-        perImageFreqs.set(imgIdx, freshFreq);
-        try { console.log('[FTP contentScript][img', imgIdx, '] Frecuencia leída de storage al recoger pieza ->', freshFreq); } catch (e) {}
-      } catch (e) {}
-      
-      if (!Array.isArray(imgObj.collectedPieces)) {
-        imgObj.collectedPieces = [];
-      }
-      
-      if (!imgObj.collectedPieces.includes(pieceIdx)) {
-        imgObj.collectedPieces.push(pieceIdx);
-        
-        // Guardar en la clave correcta
-        let key = result.findThePiecesImages ? 'findThePiecesImages' : 'findThePixelsImages';
-        chrome.storage.local.set({ [key]: imgs }, () => {
-          // Notify main page / UI layer with collectedPieces (optional extra payload)
-          try {
-            if (chrome.runtime && chrome.runtime.sendMessage) {
-              chrome.runtime.sendMessage({
-                type: 'PIECE_COLLECTED',
-                imageIndex: imgIdx,
-                pieceIndex: pieceIdx,
-                collectedPieces: imgObj.collectedPieces
-              });
-            }
-          } catch (_) {}
+        const fNowCap = (perImageFreqs.has(imgIdx) ? perImageFreqs.get(imgIdx) : 5);
+        if (fNowCap > 50 && getCollectedCountForTab(imgIdx) >= 5) {
+          try { stopImageScheduler(imgIdx); } catch(_) {}
+          logStep('cap stop scheduler');
+          return;
+        }
+      } catch (e) { logStep('cap check exception'); }
+      logStep('after cap check');
 
-          // Note: per-tab cap was incremented immediately upon click to avoid races
-          
-          // Check if puzzle is complete
-          const rows = imgObj.puzzleRows || imgObj.gridSize || 3;
-          const cols = imgObj.puzzleCols || imgObj.gridSize || 3;
-          const totalPieces = rows * cols;
-          if (imgObj.collectedPieces.length >= totalPieces) {
-            // Puzzle completed
-          }
-          
-          // Reanudar el ciclo (sin mostrar pieza inmediata) con la frecuencia actual,
-          // salvo que el cap (freq>50 y 5 piezas locales) se haya alcanzado en esta pestaña
-          if (showPieces) {
-            try {
-              const fNow = (perImageFreqs.has(imgIdx) ? perImageFreqs.get(imgIdx) : ((typeof imgObj.frequency === 'number' && imgObj.frequency > 0) ? imgObj.frequency : 5));
-              if (fNow > 50 && getCollectedCountForTab(imgIdx) >= 5) {
-                // Stop any pending timer and do not restart for this image in this tab
-                try { stopImageScheduler(imgIdx); } catch (_) {}
-                return;
-              }
-            } catch (e) {}
-            try { perImagePausedDueToVisible.delete(imgIdx); } catch (e) {}
-            try { stopImageScheduler(imgIdx); } catch (e) {}
-            try { startImageScheduler(imgIdx, imgObj); } catch (e) {}
-          }
-        });
-      }
-    });
+      // 6. Clear paused flag
+      try { perImagePausedDueToVisible.delete(imgIdx); } catch (e) { logStep('paused delete exception'); }
+      logStep('after clear paused flag');
+
+      // 7. Stop existing scheduler (if any)
+      try { stopImageScheduler(imgIdx); } catch (e) { logStep('stop scheduler exception'); }
+      logStep('after stop scheduler');
+
+      // 8. Restart scheduler (could be replaced by immediate launch in future)
+      try { startImageScheduler(imgIdx, null); } catch (e) { logStep('start scheduler exception'); }
+      logStep('after start scheduler');
   }
 
 })();

@@ -315,12 +315,74 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         // Configurar event listeners globales
         setupGlobalEventListeners();
+        // Flush pending scheduled save on unload to reduce data loss risk
+        try {
+            window.addEventListener('beforeunload', () => {
+                try { window.storageManager.flushPending(); } catch (_) {}
+            });
+        } catch (_) {}
         
         console.log('Aplicación inicializada correctamente');
         
     } catch (error) {
         console.error('Error al inicializar la aplicación:', error);
     }
+    
+    // Iniciar polling cada 2s para consumir feed de eventos y aplicar cambios/persistir
+    try {
+        if (!window.__ftpPiecesPoller) {
+            window.__ftpFeedCursor = window.__ftpFeedCursor || 0;
+            window.__ftpPiecesPoller = setInterval(() => {
+                try {
+                    chrome.storage && chrome.storage.local && chrome.storage.local.get && chrome.storage.local.get(['ftp_collectionFeed', 'ftp_collectionSeq'], (res) => {
+                        try {
+                            const feed = Array.isArray(res.ftp_collectionFeed) ? res.ftp_collectionFeed : [];
+                            const newEvents = feed.filter(ev => ev && typeof ev.id === 'number' && ev.id > window.__ftpFeedCursor);
+                            if (!newEvents.length) return;
+                            window.__ftpFeedCursor = Math.max(window.__ftpFeedCursor, ...newEvents.map(e => e.id));
+
+                            let anyChange = false;
+                            newEvents.forEach((ev) => {
+                                try {
+                                    const idx = ev.imageIndex;
+                                    const p = ev.pieceIndex;
+                                    if (idx < 0 || idx >= allImages.length) return;
+                                    const img = allImages[idx];
+                                    if (!img || !img.puzzle) return;
+                                    const set = new Set(Array.isArray(img.collectedPieces) ? img.collectedPieces : []);
+                                    if (!set.has(p)) {
+                                        set.add(p);
+                                        img.collectedPieces = Array.from(set).sort((a,b)=>a-b);
+                                        anyChange = true;
+
+                                        // Actualizar puzzle en vivo si está abierto
+                                        const isViewingThis = window.puzzleManager && window.puzzleManager.isViewingPuzzle && window.puzzleManager.currentImageIndex === idx;
+                                        if (isViewingThis && window.uiManager && typeof window.uiManager.addPieceToCurrentPuzzle === 'function') {
+                                            window.uiManager.addPieceToCurrentPuzzle(p);
+                                            if (window.puzzleManager.currentImageObj) {
+                                                window.puzzleManager.currentImageObj.collectedPieces = img.collectedPieces.slice();
+                                            }
+                                        }
+                                    }
+                                } catch (_) {}
+                            });
+
+                            if (anyChange) {
+                                window.allImages = allImages;
+                                // Persistencia ahora la realiza background.js al consumir el feed; aquí solo UI
+                                // Refrescar galería si no hay puzzle activo
+                                const isViewingAnyPuzzle = window.puzzleManager && window.puzzleManager.isViewingPuzzle;
+                                if (!isViewingAnyPuzzle && window.uiManager && typeof window.uiManager.renderPreviews === 'function') {
+                                    window.uiManager.renderPreviews();
+                                }
+                                try { updateBuyMeVisibility(); } catch (e) {}
+                            }
+                        } catch (_) {}
+                    });
+                } catch (_) {}
+            }, 2000);
+        }
+    } catch (e) {}
 });
 
 // Configurar event listeners globales
@@ -349,17 +411,57 @@ window.findThePiecesApp = {
     
     // Añadir una nueva imagen
     addImage: (imageData) => {
+        const t0Global = (performance && performance.now) ? performance.now() : Date.now();
+        const labelBase = `[AddImage idx=${allImages.length} name=${(imageData && imageData.name) || 'unnamed'}]`;
+        try { console.log(`${labelBase} START`); } catch (_) {}
+
+        // Phase 1: push & update reference
+        const tPushStart = (performance && performance.now) ? performance.now() : Date.now();
         const newIndex = allImages.length;
         allImages.push(imageData);
         window.allImages = allImages; // Actualizar referencia global
-        window.storageManager.saveImages(allImages);
-        window.uiManager.renderPreviews();
-        
-        // Notificar a todos los contentScripts sobre la nueva imagen
-        if (window.MessageSystem) {
-            window.MessageSystem.notifyNewImageAdded(newIndex, imageData);
+        const tPushEnd = (performance && performance.now) ? performance.now() : Date.now();
+        try { console.log(`${labelBase} phase:push done in ${(tPushEnd - tPushStart).toFixed(2)} ms (total images=${allImages.length})`); } catch (_) {}
+
+        // Phase 2: schedule async persist (non-blocking)
+        const tSaveScheduleStart = (performance && performance.now) ? performance.now() : Date.now();
+        try {
+            window.storageManager.scheduleSave(allImages);
+        } catch (e) {
+            try { console.warn(`${labelBase} phase:save-schedule ERROR`, e); } catch (_) {}
         }
-        
+        const tSaveScheduleEnd = (performance && performance.now) ? performance.now() : Date.now();
+        try { console.log(`${labelBase} phase:save-schedule enqueued in ${(tSaveScheduleEnd - tSaveScheduleStart).toFixed(2)} ms`); } catch (_) {}
+
+        // Phase 3: re-render previews (full gallery rebuild)
+        const tRenderStart = (performance && performance.now) ? performance.now() : Date.now();
+        try {
+            window.uiManager.renderPreviews();
+        } catch (e) {
+            try { console.warn(`${labelBase} phase:render ERROR`, e); } catch (_) {}
+        }
+        const tRenderEnd = (performance && performance.now) ? performance.now() : Date.now();
+        try { console.log(`${labelBase} phase:render done in ${(tRenderEnd - tRenderStart).toFixed(2)} ms`); } catch (_) {}
+
+        // Phase 4: broadcast to content scripts
+        const tBroadcastStart = (performance && performance.now) ? performance.now() : Date.now();
+        if (window.MessageSystem) {
+            try {
+                window.MessageSystem.notifyNewImageAdded(newIndex, imageData);
+            } catch (e) {
+                try { console.warn(`${labelBase} phase:broadcast ERROR`, e); } catch (_) {}
+            }
+        }
+        const tBroadcastEnd = (performance && performance.now) ? performance.now() : Date.now();
+        try { console.log(`${labelBase} phase:broadcast done in ${(tBroadcastEnd - tBroadcastStart).toFixed(2)} ms`); } catch (_) {}
+
+        const tGlobalEnd = (performance && performance.now) ? performance.now() : Date.now();
+        const total = (tGlobalEnd - t0Global).toFixed(2);
+        const pct = (part) => ((part / (tGlobalEnd - t0Global)) * 100).toFixed(1);
+        try {
+            console.log(`${labelBase} END total=${total} ms | push=${(tPushEnd - tPushStart).toFixed(2)} ms (${pct(tPushEnd - tPushStart)}%) | save=${(tSaveEnd - tSaveStart).toFixed(2)} ms (${pct(tSaveEnd - tSaveStart)}%) | render=${(tRenderEnd - tRenderStart).toFixed(2)} ms (${pct(tRenderEnd - tRenderStart)}%) | broadcast=${(tBroadcastEnd - tBroadcastStart).toFixed(2)} ms (${pct(tBroadcastEnd - tBroadcastStart)}%)`);
+        } catch (_) {}
+
         return newIndex; // Retornar índice de la nueva imagen
     },
     
@@ -368,7 +470,7 @@ window.findThePiecesApp = {
         if (idx >= 0 && idx < allImages.length) {
             Object.assign(allImages[idx], updates);
             window.allImages = allImages; // Actualizar referencia global
-            window.storageManager.saveImages(allImages);
+            window.storageManager.scheduleSave(allImages);
             window.uiManager.renderPreviews();
         }
     },
@@ -379,7 +481,8 @@ window.findThePiecesApp = {
             const oldImage = { ...allImages[idx] };
             Object.assign(allImages[idx], updates);
             window.allImages = allImages; // Actualizar referencia global
-            window.storageManager.saveImages(allImages);
+            // Silent updates can be batched; just schedule
+            window.storageManager.scheduleSave(allImages);
             
             // Notificar cambios específicos al contentScript
             if (updates.frequency !== undefined && updates.frequency !== oldImage.frequency) {
@@ -407,7 +510,7 @@ window.findThePiecesApp = {
         if (idx >= 0 && idx < allImages.length) {
             allImages.splice(idx, 1);
             window.allImages = allImages; // Actualizar referencia global
-            window.storageManager.saveImages(allImages);
+            window.storageManager.scheduleSave(allImages);
             window.uiManager.renderPreviews();
             // Notify content scripts to remove any pieces belonging to this image
             if (window.MessageSystem) {

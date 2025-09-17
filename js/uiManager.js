@@ -50,6 +50,15 @@ class UIManager {
             // Filtro por estado
             if (statusFilter === 'completed' && !imgObj.completed) return false;
             if (statusFilter === 'incomplete' && imgObj.completed) return false;
+            if (statusFilter === 'pending-pieces') {
+                // Mostrar imágenes que aún tienen piezas por recolectar.
+                // Criterio: imagen no completada Y collectedPieces < totalPieces
+                const collected = Array.isArray(imgObj.collectedPieces) ? imgObj.collectedPieces.length : 0;
+                const dims = this.calculatePuzzleDimensions(imgObj);
+                const totalPieces = (dims.rows || 0) * (dims.cols || 0);
+                if (imgObj.completed) return false; // ya completado, no pendiente
+                if (totalPieces > 0 && collected >= totalPieces) return false; // todas las piezas recolectadas
+            }
             
             // Filtro por dificultad
             if (difficultyFilter !== 'all') {
@@ -343,7 +352,7 @@ class UIManager {
                 <div class="frequency-control">
                     <label>
                         <span>Pieces' appearance frequency:</span>
-                        <input type="range" min="1" max="100" value="${imgObj.frequency || 10}" class="freq-slider" data-idx="${idx}">
+                        <input type="range" min="1" max="100" value="${imgObj.frequency || 10}" class="freq-slider" data-idx="${idx}" title="Set to 'Always' if you want to gather all the pieces quicly.">
                         <span class="freq-value">${this.getFrequencyText(imgObj.frequency || 10)}</span>
                     </label>
                 </div>
@@ -828,6 +837,10 @@ class UIManager {
     // Persist helper: save immediately using the available mechanism
     const persistNow = async () => {
         try {
+            // For completion saves we prefer not to show the global saving overlay so
+            // set a temporary suppress flag on the storage manager which will be
+            // honored by saveImages. This keeps the optimistic celebration UX.
+            try { if (window.storageManager) window.storageManager._suppressNextOverlay = true; } catch (_) {}
             if (window.findThePiecesApp && typeof window.findThePiecesApp.updateImageSilent === 'function') {
                 await window.findThePiecesApp.updateImageSilent(idx, {
                     puzzleState: puzzleState,
@@ -835,10 +848,14 @@ class UIManager {
                     completedAt: imgObj.completedAt
                 });
             } else if (window.storageManager && typeof window.storageManager.saveImages === 'function') {
-                window.storageManager.saveImages(window.allImages);
+                // direct save as fallback; storageManager.saveImages will respect the suppress flag
+                window.storageManager.saveImages(window.allImages, { showLoader: false });
             }
         } catch (err) {
-            try { window.storageManager && window.storageManager.saveImages && window.storageManager.saveImages(window.allImages); } catch (_) {}
+            try {
+                if (window.storageManager) window.storageManager._suppressNextOverlay = true;
+                window.storageManager && window.storageManager.saveImages && window.storageManager.saveImages(window.allImages, { showLoader: false });
+            } catch (_) {}
         }
     };
         

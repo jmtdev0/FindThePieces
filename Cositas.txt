@@ -1,3 +1,4 @@
+La Pace - Kingdom Hearts Re:Chain of Memories Extended Soundtrack para el VÍDEO
 DRAG & DROP
 
 Resolución, que no se corte, que haga el corte en función de las medidas
@@ -45,5 +46,7 @@ Poder hacer zoom en la foto
 -- Hacer las líneas del puzle más finas en puzles de muchas piezas
 
 -- Rendimiento. Solo trabajar con las pestañas con las que interactúe el usuario maybe en vez de notificar a todas
+Code en descripción de extensión
+Decir que te va a afectar y que la desactives cuando quieras ser Perforamente
 
 

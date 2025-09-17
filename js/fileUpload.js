@@ -6,6 +6,9 @@ class FileUploadManager {
         this.modal = document.getElementById('uploadModal');
         this.uploadArea = this.modal.querySelector('.upload-area');
         this.imageInput = document.getElementById('imageInput');
+    // Configuración de compresión
+    this.TARGET_MAX_MB = 4; // Límite objetivo para ofrecer compresión
+    this.TARGET_MAX_BYTES = this.TARGET_MAX_MB * 1024 * 1024;
         this.initializeEventListeners();
     }
 
@@ -61,76 +64,220 @@ class FileUploadManager {
         this.handleFiles(files);
     }
 
-    handleFiles(files) {
-        const IMAGE_MAX_BYTES = 10 * 1024 * 1024; // 10 MB limit
+    async handleFiles(files) {
         const imageFiles = files.filter(file => file.type.startsWith('image/'));
         if (imageFiles.length === 0) {
             alert('Please select valid image files.');
             return;
         }
 
-        const oversized = imageFiles.filter(f => f.size > IMAGE_MAX_BYTES);
-        const withinLimit = imageFiles.filter(f => f.size <= IMAGE_MAX_BYTES);
+        // No hard size limit anymore; every image will be offered compression
+        const candidates = imageFiles;
 
-        if (oversized.length > 0) {
-            const names = oversized.map(f => `${f.name} (${(f.size/1024/1024).toFixed(2)} MB)`).join('\n');
-            alert('The following files exceed the 10 MB limit and were skipped:\n\n' + names);
-        }
+        for (const file of candidates) {
+            try {
+                const processed = await this.processFileWithOptionalCompression(file);
+                if (!processed) continue; // User cancelled or error
 
-        if (withinLimit.length === 0) {
-            // All candidate images were too large
-            return;
-        }
+                const { dataURL, width, height, meta } = processed;
 
-        withinLimit.forEach(file => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
                 const imageData = {
                     name: file.name,
-                    src: e.target.result,
+                    src: dataURL,
                     date: new Date().toISOString(),
                     addedAt: new Date().toISOString(),
-                    width: 0,
-                    height: 0,
+                    width,
+                    height,
                     collectedPieces: [],
                     completed: false,
                     publishedToInstagram: false,
                     puzzle: true,
-                    frequency: 10
+                    frequency: 10,
+                    // Metadatos de compresión para diagnóstico
+                    originalBytes: meta.originalBytes,
+                    finalBytes: meta.finalBytes,
+                    compressed: meta.compressed,
+                    compressionQuality: meta.quality || null,
+                    compressionFormat: meta.format || null
                 };
 
-                // Determinar dimensiones de la imagen
-                const img = new Image();
-                img.onload = () => {
-                    imageData.width = img.width;
-                    imageData.height = img.height;
-                    
-                    // Calcular dimensiones del puzzle según la dificultad actual
-                    const puzzleDifficulty = document.getElementById('puzzleDifficulty');
-                    const difficulty = puzzleDifficulty ? puzzleDifficulty.value : 'easy';
-                    const { rows, cols } = this.calculatePuzzleDimensions(imageData, difficulty);
-                    
-                    console.log(`FileUpload: Image "${imageData.name}" - difficulty: ${difficulty}, dimensions: ${rows}x${cols}`);
-                    
-                    // Guardar las dimensiones del puzzle
-                    imageData.puzzleRows = rows;
-                    imageData.puzzleCols = cols;
-                    
-                    // Añadir imagen usando la API centralizada
-                    if (window.findThePiecesApp) {
-                        window.findThePiecesApp.addImage(imageData);
-                    }
+                const puzzleDifficulty = document.getElementById('puzzleDifficulty');
+                const difficulty = puzzleDifficulty ? puzzleDifficulty.value : 'easy';
+                const { rows, cols } = this.calculatePuzzleDimensions(imageData, difficulty);
+                imageData.puzzleRows = rows;
+                imageData.puzzleCols = cols;
 
-                    // Cerrar modal
-                    this.modal.classList.remove('show');
+                console.log(`FileUpload: Image "${imageData.name}" (${(imageData.finalBytes/1024/1024).toFixed(2)} MB) - difficulty: ${difficulty}, puzzle: ${rows}x${cols}${imageData.compressed ? ' (compressed)' : ''}`);
 
-                    // Clear the file input so the same file can be selected again later
-                    try { this.imageInput.value = ''; } catch (_) {}
-                };
-                img.src = e.target.result;
+                if (window.findThePiecesApp) {
+                    window.findThePiecesApp.addImage(imageData);
+                }
+            } catch (err) {
+                console.error('FileUpload: error processing file', file.name, err);
+            }
+        }
+
+        // Cerrar modal y limpiar input
+        this.modal.classList.remove('show');
+        try { this.imageInput.value = ''; } catch (_) {}
+    }
+
+    async processFileWithOptionalCompression(file) {
+        const originalBytes = file.size;
+        const originalMB = originalBytes / 1024 / 1024;
+        let needsCompression = originalBytes > this.TARGET_MAX_BYTES;
+
+        if (needsCompression) {
+            // Show the in-modal English prompt instead of a native confirm()
+            const accept = await this.showCompressionPrompt(file, originalMB);
+            if (!accept) return null;
+        }
+
+        // Leer a DataURL
+        const dataURL = await this.readFileAsDataURL(file);
+        const img = await this.loadImage(dataURL);
+
+        if (!needsCompression) {
+            return {
+                dataURL,
+                width: img.width,
+                height: img.height,
+                meta: { originalBytes, finalBytes: originalBytes, compressed: false }
             };
+        }
+
+        // Comprimir a ~TARGET_MAX_BYTES manteniendo dimensiones
+        const compressionResult = await this.compressImageToTarget(img, this.TARGET_MAX_BYTES);
+        return {
+            dataURL: compressionResult.dataURL,
+            width: img.width,
+            height: img.height,
+            meta: {
+                originalBytes,
+                finalBytes: compressionResult.bytes,
+                compressed: true,
+                quality: compressionResult.quality,
+                format: compressionResult.format
+            }
+        };
+    }
+
+    readFileAsDataURL(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(reader.error);
+            reader.onload = () => resolve(reader.result);
             reader.readAsDataURL(file);
         });
+    }
+
+    loadImage(dataURL) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = dataURL;
+        });
+    }
+
+    blobToDataURL(blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(reader.error);
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    // Show the in-modal compression prompt (English) and resolve true if user accepts compression
+    showCompressionPrompt(file, originalMB) {
+        return new Promise((resolve) => {
+            const warning = document.getElementById('uploadLargeWarning');
+            const warningText = document.getElementById('uploadLargeWarningText');
+            const compressBtn = document.getElementById('uploadCompressBtn');
+            const skipBtn = document.getElementById('uploadSkipBtn');
+
+            if (!warning || !warningText || !compressBtn || !skipBtn) {
+                // Fallback to native confirm if modal elements are missing
+                const ok = confirm(`The image "${file.name}" is ${originalMB.toFixed(2)} MB. Convert to a ~${this.TARGET_MAX_MB} MB version?`);
+                resolve(!!ok);
+                return;
+            }
+
+            warningText.textContent = `The image "${file.name}" is ${originalMB.toFixed(2)} MB. Large images may impact extension and browser performance. Do you want to convert it to a smaller (~${this.TARGET_MAX_MB} MB) image while keeping the original dimensions?`;
+            warning.style.display = 'block';
+
+            const cleanup = () => {
+                warning.style.display = 'none';
+                compressBtn.removeEventListener('click', onCompress);
+                skipBtn.removeEventListener('click', onSkip);
+            };
+
+            const onCompress = () => { cleanup(); resolve(true); };
+            const onSkip = () => { cleanup(); resolve(false); };
+
+            compressBtn.addEventListener('click', onCompress);
+            skipBtn.addEventListener('click', onSkip);
+        });
+    }
+
+    async compressImageToTarget(img, targetBytes) {
+        // Usamos JPEG siempre para maximizar compresión visual razonable
+        const format = 'image/jpeg';
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+
+        // Si una versión calidad 0.95 ya cabe, usarla directamente
+        const initialBlob = await new Promise(res => canvas.toBlob(res, format, 0.95));
+        if (!initialBlob) throw new Error('No se pudo generar blob inicial');
+        if (initialBlob.size <= targetBytes * 1.05) {
+            return {
+                dataURL: await this.blobToDataURL(initialBlob),
+                bytes: initialBlob.size,
+                quality: 0.95,
+                format
+            };
+        }
+
+        let low = 0.4; // calidad mínima aceptable (ajustable)
+        let high = 0.95;
+        let best = { blob: initialBlob, quality: 0.95, diff: Math.abs(initialBlob.size - targetBytes) };
+        const maxIterations = 8;
+        const lowerBound = targetBytes * 0.85; // tolerancia inferior
+        const upperBound = targetBytes * 1.05; // tolerancia superior
+
+        for (let i = 0; i < maxIterations; i++) {
+            const mid = (low + high) / 2;
+            const blob = await new Promise(res => canvas.toBlob(res, format, mid));
+            if (!blob) break;
+            const size = blob.size;
+            const diff = Math.abs(size - targetBytes);
+            if (diff < best.diff) {
+                best = { blob, quality: mid, diff };
+            }
+
+            if (size > upperBound) {
+                // Demasiado grande -> reducir calidad
+                high = mid;
+            } else if (size < lowerBound) {
+                // Demasiado pequeño -> podemos aumentar calidad
+                low = mid;
+            } else {
+                // Dentro de tolerancia
+                best = { blob, quality: mid, diff };
+                break;
+            }
+        }
+
+        return {
+            dataURL: await this.blobToDataURL(best.blob),
+            bytes: best.blob.size,
+            quality: parseFloat(best.quality.toFixed(3)),
+            format
+        };
     }
 
     // Calcular dimensiones del puzzle basándose en la dificultad

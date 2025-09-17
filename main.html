@@ -24,6 +24,7 @@
         <label for="statusFilter">Status:</label>
         <select id="statusFilter">
           <option value="all">All</option>
+          <option value="pending-pieces">Pieces remaining</option>
           <option value="completed">Completed</option>
           <option value="incomplete">Incomplete</option>
         </select>
@@ -83,9 +84,16 @@
         <label for="imageInput" class="upload-label">
           <span>📁 Select files</span>
           <small>or drag them here</small>
-          <small>(max 10 MB)</small>
         </label>
         <input type="file" id="imageInput" multiple accept="image/*">
+      </div>
+      <!-- Large file warning (controlled from JS) -->
+      <div id="uploadLargeWarning" style="display:none;margin-top:12px;padding:12px;border-radius:8px;background:#fff8e1;color:#333;">
+        <div id="uploadLargeWarningText" style="margin-bottom:10px;font-size:14px;"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="uploadCompressBtn" style="background:#b2d900;border:0;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:600;">Compress to ~4 MB</button>
+          <button id="uploadSkipBtn" style="background:#eee;border:0;padding:8px 12px;border-radius:6px;cursor:pointer;">Skip image</button>
+        </div>
       </div>
     </div>
   </div>
