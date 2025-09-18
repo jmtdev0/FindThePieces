@@ -69,7 +69,7 @@
 
   // Debug logging control
   // Toggle this to enable/disable console output from this content script
-  let IT_DEBUG = true;
+  let IT_DEBUG = false;
   // Optional: allow enabling via window.FTP_DEBUG or localStorage('FTP_DEBUG' = '1'|'true')
   try {
     if (typeof window !== 'undefined' && typeof window.FTP_DEBUG === 'boolean') {
