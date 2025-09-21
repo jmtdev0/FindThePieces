@@ -1329,7 +1329,7 @@ class UIManager {
             statusMsg.style.color = '#b2d900';
             statusMsg.style.fontWeight = 'bold';
         } else if (collected.length === totalPieces) {
-            statusMsg.innerHTML = '🧩 All pieces collected!<br><small style="color: #666;">Click on pieces to select them and move them using arrow keys ↑↓←→.</small>';
+            statusMsg.innerHTML = '🧩 All pieces collected!<br><small style="color: #666;">Drag pieces with your mouse or click on them and move them using arrow keys ↑↓←→.</small>';
             statusMsg.style.color = '#ff9100';
         } else {
             statusMsg.textContent = `🔍 Collect more pieces by browsing websites. ${totalPieces - collected.length} pieces remaining.`;
@@ -1505,33 +1505,89 @@ class UIManager {
             animation: popup-appear 0.5s ease-out forwards;
         `;
 
-        // Verificar si ya se publicó en Instagram o está bloqueada
-        const alreadyPublished = imgObj.publishedToInstagram || false;
-        const isBlocked = imgObj.instagramBlocked || false;
-        
-        popup.innerHTML = `
-            <div style="font-size: 48px; margin-bottom: 15px;">🎉</div>
-            <h2 style="margin: 0 0 10px 0; font-size: 28px;">Congratulations!</h2>
-            <p style="margin: 0 0 20px 0; font-size: 16px; opacity: 0.9;">You've completed the puzzle!</p>
-            <div style="margin-bottom: 20px;">
-                ${alreadyPublished ? 
-                    `<p style="margin: 0 0 15px 0; font-size: 14px; color: #22d07a;">✅ Successfully shared on Instagram!</p>
-                    ${imgObj.instagramPermalink ? 
-                        `<a href="${imgObj.instagramPermalink}" target="_blank" style="
-                            display: inline-block;
-                            background: linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%);
-                            color: white;
-                            text-decoration: none;
-                            padding: 10px 20px;
-                            border-radius: 25px;
-                            font-size: 14px;
-                            font-weight: bold;
-                            margin: 0 10px 15px 0;
-                            transition: transform 0.3s ease;
-                        ">
-                            📱 View on Instagram
-                        </a>` : ''
-                    }
+        // Verificar estado de publicación/bloqueo y bandera de éxito inmediato
+        const alreadyPublished = !!imgObj.publishedToInstagram;
+        const isBlocked = !!imgObj.instagramBlocked;
+        let showSuccessNow = !!imgObj.__justSharedInstagram;
+        if (showSuccessNow) {
+            try { delete imgObj.__justSharedInstagram; } catch (_) {}
+        }
+
+        // Construir el bloque central de contenido de forma clara con if/else
+        let contentSection = '';
+        if (showSuccessNow) {
+            contentSection = `
+                <p style="margin: 0 0 15px 0; font-size: 14px; color: #22d07a;">✅ Successfully shared on Instagram!</p>
+                ${imgObj.instagramPermalink ? `
+                    <a href="${imgObj.instagramPermalink}" target="_blank" style="
+                        display: inline-block;
+                        background: linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%);
+                        color: white;
+                        text-decoration: none;
+                        padding: 10px 20px;
+                        border-radius: 25px;
+                        font-size: 14px;
+                        font-weight: bold;
+                        margin: 0 10px 15px 0;
+                        transition: transform 0.3s ease;
+                    ">
+                        📱 View on Instagram
+                    </a>
+                ` : ''}
+                <button id="skip-upload" style="
+                    background: rgba(255,255,255,0.2);
+                    border: 2px solid white;
+                    color: white;
+                    padding: 10px 20px;
+                    border-radius: 25px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    transition: all 0.3s ease;
+                    margin: 0 auto;
+                    display: block;
+                ">Close</button>
+            `;
+        } else if (alreadyPublished) {
+            contentSection = `
+                <p style="margin: 0 0 15px 0; font-size: 14px; color: #FFD700;">This image has been shared on Instagram already.</p>
+                ${imgObj.instagramPermalink ? `
+                    <a href="${imgObj.instagramPermalink}" target="_blank" style="
+                        display: inline-block;
+                        background: linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%);
+                        color: white;
+                        text-decoration: none;
+                        padding: 10px 20px;
+                        border-radius: 25px;
+                        font-size: 14px;
+                        font-weight: bold;
+                        margin: 0 10px 15px 0;
+                        transition: transform 0.3s ease;
+                    ">
+                        📱 View on Instagram
+                    </a>
+                ` : ''}
+                <button id="skip-upload" style="
+                    background: rgba(255,255,255,0.2);
+                    border: 2px solid white;
+                    color: white;
+                    padding: 10px 20px;
+                    border-radius: 25px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    transition: all 0.3s ease;
+                    margin: 0 auto;
+                    display: block;
+                ">Close</button>
+            `;
+        } else if (isBlocked) {
+            if (imgObj.instagramFailureMessage) {
+                contentSection = `
+                    <p style="margin: 0 0 15px 0; font-size: 14px; color: #ff6b6b;">⚠️ We couldn't share your puzzle on Instagram</p>
+                    <p style="margin: 0 0 12px 0; font-size: 13px; color: rgba(255,255,255,0.95); line-height: 1.4;">Instagram message:</p>
+                    <div style="margin: 0 0 12px 0; padding: 12px; background: rgba(0,0,0,0.12); color: #ffdede; border-radius: 8px; font-size: 13px; word-wrap: break-word; text-align: left;">
+                        ${String(imgObj.instagramFailureMessage).replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+                    </div>
+                    <p style="margin: 0 0 8px 0; font-size: 12px; color: rgba(255,255,255,0.8);">This image cannot be uploaded to Instagram and further attempts will not succeed.</p>
                     <button id="skip-upload" style="
                         background: rgba(255,255,255,0.2);
                         border: 2px solid white;
@@ -1543,118 +1599,93 @@ class UIManager {
                         transition: all 0.3s ease;
                         margin: 20px auto 0 auto;
                         display: block;
-                    ">
-                        Close
-                    </button>` :
-                    isBlocked ?
-                    // If the image is blocked, show a friendly non-retry message.
-                    // If we have a stored Instagram failure message, surface it for the user.
-                    (imgObj.instagramFailureMessage ?
-                        `
-                        <p style="margin: 0 0 15px 0; font-size: 14px; color: #ff6b6b;">⚠️ We couldn't share your puzzle on Instagram</p>
-                        <p style="margin: 0 0 12px 0; font-size: 13px; color: rgba(255,255,255,0.95); line-height: 1.4;">Instagram message:</p>
-                        <div style="margin: 0 0 12px 0; padding: 12px; background: rgba(0,0,0,0.12); color: #ffdede; border-radius: 8px; font-size: 13px; word-wrap: break-word; text-align: left;">
-                            ${String(imgObj.instagramFailureMessage).replace(/</g, '&lt;').replace(/>/g, '&gt;')}
-                        </div>
-                        <p style="margin: 0 0 8px 0; font-size: 12px; color: rgba(255,255,255,0.8);">This image cannot be uploaded to Instagram and further attempts will not succeed.</p>
-                        <button id="skip-upload" style="
-                            background: rgba(255,255,255,0.2);
-                            border: 2px solid white;
-                            color: white;
-                            padding: 10px 20px;
-                            border-radius: 25px;
-                            cursor: pointer;
-                            font-size: 14px;
-                            transition: all 0.3s ease;
-                            margin: 20px auto 0 auto;
-                            display: block;
-                        ">
-                            Close
-                        </button>
-                        ` :
-                        `
-                        <p style="margin: 0 0 15px 0; font-size: 14px; color: #ff6b6b;">⚠️ This image cannot be shared on Instagram</p>
-                        <p style="margin: 0 0 8px 0; font-size: 12px; color: rgba(255,255,255,0.7); line-height: 1.4;">Content was flagged as inappropriate during moderation</p>
-                        ${imgObj.instagramModerationCategories && imgObj.instagramModerationCategories.length > 0 ? 
-                            `<p style="margin: 0 0 15px 0; font-size: 11px; color: rgba(255,255,255,0.6); font-style: italic; word-wrap: break-word;">Categories: ${imgObj.instagramModerationCategories.join(', ')}</p>` : 
-                            `<div style="margin-bottom: 15px;"></div>`
-                        }
-                        <button id="skip-upload" style="
-                            background: rgba(255,255,255,0.2);
-                            border: 2px solid white;
-                            color: white;
-                            padding: 10px 20px;
-                            border-radius: 25px;
-                            cursor: pointer;
-                            font-size: 14px;
-                            transition: all 0.3s ease;
-                            margin: 20px auto 0 auto;
-                            display: block;
-                        ">
-                            Close
-                        </button>
-                        `)
-                    :
-                    `<p style="margin: 0 0 15px 0; font-size: 14px;">Would you like to share your completed puzzle on Instagram?</p>
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: white; cursor: pointer;">
-                            <input type="checkbox" id="customize-caption" style="cursor: pointer;">
-                            <span>Customize caption text</span>
-                        </label>
+                    ">Close</button>
+                `;
+            } else {
+                contentSection = `
+                    <p style="margin: 0 0 15px 0; font-size: 14px; color: #ff6b6b;">⚠️ This image cannot be shared on Instagram</p>
+                    <p style="margin: 0 0 8px 0; font-size: 12px; color: rgba(255,255,255,0.7); line-height: 1.4;">Content was flagged as inappropriate during moderation</p>
+                    ${imgObj.instagramModerationCategories && imgObj.instagramModerationCategories.length > 0 
+                        ? `<p style="margin: 0 0 15px 0; font-size: 11px; color: rgba(255,255,255,0.6); font-style: italic; word-wrap: break-word;">Categories: ${imgObj.instagramModerationCategories.join(', ')}</p>`
+                        : `<div style="margin-bottom: 15px;"></div>`}
+                    <button id="skip-upload" style="
+                        background: rgba(255,255,255,0.2);
+                        border: 2px solid white;
+                        color: white;
+                        padding: 10px 20px;
+                        border-radius: 25px;
+                        cursor: pointer;
+                        font-size: 14px;
+                        transition: all 0.3s ease;
+                        margin: 20px auto 0 auto;
+                        display: block;
+                    ">Close</button>
+                `;
+            }
+        } else {
+            contentSection = `
+                <p style="margin: 0 0 15px 0; font-size: 14px;">Would you like to share your completed puzzle on Instagram?</p>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: white; cursor: pointer;">
+                        <input type="checkbox" id="customize-caption" style="cursor: pointer;">
+                        <span>Customize caption text</span>
+                    </label>
+                </div>
+                <div id="caption-container" style="display: none; margin-bottom: 15px;">
+                    <textarea id="custom-caption" placeholder="🧩 Write your custom Instagram caption here...\n\nYou can include emojis, hashtags, and mentions!\nMax 2000 characters." maxlength="2000" style="
+                        width: 100%;
+                        height: 100px;
+                        padding: 12px;
+                        border-radius: 8px;
+                        border: 1px solid rgba(255,255,255,0.3);
+                        background: rgba(255,255,255,0.1);
+                        color: white;
+                        font-size: 14px;
+                        resize: vertical;
+                        font-family: Arial, sans-serif;
+                        line-height: 1.4;
+                    "></textarea>
+                    <div style="text-align: right; font-size: 12px; color: rgba(255,255,255,0.7); margin-top: 8px;">
+                        <span id="char-count">0</span>/2000 characters
                     </div>
-                    <div id="caption-container" style="display: none; margin-bottom: 15px;">
-                        <textarea id="custom-caption" placeholder="🧩 Write your custom Instagram caption here...\n\nYou can include emojis, hashtags, and mentions!\nMax 2000 characters." maxlength="2000" style="
-                            width: 100%;
-                            height: 100px;
-                            padding: 12px;
-                            border-radius: 8px;
-                            border: 1px solid rgba(255,255,255,0.3);
-                            background: rgba(255,255,255,0.1);
-                            color: white;
-                            font-size: 14px;
-                            resize: vertical;
-                            font-family: Arial, sans-serif;
-                            line-height: 1.4;
-                        "></textarea>
-                        <div style="text-align: right; font-size: 12px; color: rgba(255,255,255,0.7); margin-top: 8px;">
-                            <span id="char-count">0</span>/2000 characters
-                        </div>
-                    </div>
-                    
-                    <div id="upload-status" style="margin-bottom: 15px; text-align: center; font-size: 14px;"></div>
-                    <div style="display: flex; justify-content: center;">
-                        <button id="upload-instagram" style="
-                            background: linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%);
-                            border: none;
-                            color: white;
-                            padding: 12px 20px;
-                            border-radius: 25px;
-                            cursor: pointer;
-                            font-size: 14px;
-                            font-weight: bold;
-                            transition: all 0.3s ease;
-                            display: flex;
-                            align-items: center;
-                            gap: 8px;
-                        ">
-                            📸 Share on Instagram
-                        </button>
-                        <button id="skip-upload" style="
-                            background: rgba(255,255,255,0.2);
-                            border: 2px solid white;
-                            color: white;
-                            padding: 10px 20px;
-                            border-radius: 25px;
-                            cursor: pointer;
-                            font-size: 14px;
-                            transition: all 0.3s ease;
-                        ">
-                            Maybe later
-                        </button>
-                    </div>`
-                }
-            </div>
-`;
+                </div>
+                <div id="upload-status" style="margin-bottom: 15px; text-align: center; font-size: 14px;"></div>
+                <div style="display: flex; justify-content: center;">
+                    <button id="upload-instagram" style="
+                        background: linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%);
+                        border: none;
+                        color: white;
+                        padding: 12px 20px;
+                        border-radius: 25px;
+                        cursor: pointer;
+                        font-size: 14px;
+                        font-weight: bold;
+                        transition: all 0.3s ease;
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    ">📸 Share on Instagram</button>
+                    <button id="skip-upload" style="
+                        background: rgba(255,255,255,0.2);
+                        border: 2px solid white;
+                        color: white;
+                        padding: 10px 20px;
+                        border-radius: 25px;
+                        cursor: pointer;
+                        font-size: 14px;
+                        transition: all 0.3s ease;
+                    ">Maybe later</button>
+                </div>
+            `;
+        }
+
+        popup.innerHTML = `
+            <div style="font-size: 48px; margin-bottom: 15px;">🎉</div>
+            <h2 style="margin: 0 0 10px 0; font-size: 28px;">Congratulations!</h2>
+            <p style="margin: 0 0 20px 0; font-size: 16px; opacity: 0.9;">You've completed the puzzle!</p>
+            <div style="margin-bottom: 20px;">${contentSection}</div>
+            <div id="upload-status" style="margin-top: 15px; font-size: 14px; min-height: 20px;"></div>
+        `;
 
         // Añadir keyframes para la animación del popup si no existen
         if (!document.getElementById('popup-styles')) {
@@ -2075,6 +2106,8 @@ class UIManager {
             if (response.ok && result && result.success) {
                 // Marcar como publicado en Instagram
                 imgObj.publishedToInstagram = true;
+                // Mostrar éxito verde solo inmediatamente después de publicar por primera vez
+                imgObj.__justSharedInstagram = true;
                 if (result.instagram && result.instagram.permalink) {
                     imgObj.instagramPermalink = result.instagram.permalink;
                 }
@@ -2346,7 +2379,7 @@ class UIManager {
     // Convertir valor numérico de frecuencia a texto descriptivo
     getFrequencyText(value) {
         const numValue = parseInt(value);
-        if (numValue <= 5) return 'Always';
+        if (numValue == 1) return 'Always';
         if (numValue <= 15) return 'Very often';
         if (numValue <= 30) return 'Often';
         if (numValue <= 50) return 'Sometimes';
@@ -2604,7 +2637,7 @@ class UIManager {
                         statusEl.style.color = '#b2d900';
                         statusEl.style.fontWeight = 'bold';
                     } else if ((collected.length) === totalPieces) {
-                        statusEl.innerHTML = '🧩 All pieces collected!<br><small style="color: #666;">Click on pieces to select them and move them using arrow keys ↑↓←→.</small>';
+                        statusEl.innerHTML = '🧩 All pieces collected!<br><small style="color: #666;">Drag pieces with your mouse or click on them and move them using arrow keys ↑↓←→.</small>';
                         statusEl.style.color = '#ff9100';
                         statusEl.style.fontWeight = '';
                     } else {

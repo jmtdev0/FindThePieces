@@ -65,14 +65,36 @@ class FileUploadManager {
     }
 
     async handleFiles(files) {
-        const imageFiles = files.filter(file => file.type.startsWith('image/'));
-        if (imageFiles.length === 0) {
-            alert('Please select valid image files.');
+        // Allowed extensions and mime types
+        const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.svg', '.webp'];
+        const ALLOWED_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']);
+
+        const allowedFiles = [];
+        const rejectedFiles = [];
+
+        for (const file of files) {
+            const name = (file && file.name) ? file.name : '';
+            const dot = name.lastIndexOf('.');
+            const ext = dot >= 0 ? name.slice(dot).toLowerCase() : '';
+            if (ALLOWED_EXTENSIONS.includes(ext) || ALLOWED_MIMES.has(file.type)) {
+                allowedFiles.push(file);
+            } else {
+                // If the file has an image/ mime but an uncommon extension, still reject to be strict
+                rejectedFiles.push(name || file.type || 'Unknown file');
+            }
+        }
+
+        if (rejectedFiles.length > 0) {
+            alert(`These files are not supported and were skipped:\n${rejectedFiles.join('\n')}\n\nAllowed formats: ${ALLOWED_EXTENSIONS.join(', ')}`);
+        }
+
+        if (allowedFiles.length === 0) {
+            // Nothing to process
             return;
         }
 
-        // No hard size limit anymore; every image will be offered compression
-        const candidates = imageFiles;
+        // No hard size limit anymore; every allowed image will be offered compression when applicable
+        const candidates = allowedFiles;
 
         for (const file of candidates) {
             try {
@@ -125,7 +147,10 @@ class FileUploadManager {
     async processFileWithOptionalCompression(file) {
         const originalBytes = file.size;
         const originalMB = originalBytes / 1024 / 1024;
-        let needsCompression = originalBytes > this.TARGET_MAX_BYTES;
+        // SVGs are vector and not suitable for the canvas-based JPEG compression flow.
+        // Treat SVG as non-compressible here (we will store as-is).
+        const isSVG = file.type === 'image/svg+xml' || (file.name && file.name.toLowerCase().endsWith('.svg'));
+        let needsCompression = !isSVG && originalBytes > this.TARGET_MAX_BYTES;
 
         if (needsCompression) {
             // Show the in-modal English prompt instead of a native confirm()

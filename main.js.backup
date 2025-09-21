@@ -694,7 +694,7 @@ function renderDetailView(imgObj, idx) {
 					
 					<div style="margin-bottom: 20px;">
 						${alreadyPublished ? 
-							`<p style="margin: 0 0 15px 0; font-size: 14px; color: #FFD700;">✨ Already shared on Instagram!</p>
+							`<p style="margin: 0 0 15px 0; font-size: 14px; color: #FFD700;">This image has been shared on Instagram already.</p>
 							${imgObj.instagramPermalink ? 
 								`<a href="${imgObj.instagramPermalink}" target="_blank" style="
 									display: inline-block;

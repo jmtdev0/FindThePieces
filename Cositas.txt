@@ -49,4 +49,10 @@ Poder hacer zoom en la foto
 Code en descripción de extensión
 Decir que te va a afectar y que la desactives cuando quieras ser Perforamente
 
+Falla al comprimir un .tif de 24 MB (stormdrain_high.tif)
+Que Always sea solo con 1 exacto
+Que si la foto ya se ha subido ponga "Already shared"
+Click on pieces to select them and move them using arrow keys ↑↓←→
+
+Tener una lista para imágenes con piezas pendientes y otra para las ya completadas
 

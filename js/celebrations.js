@@ -91,24 +91,67 @@ class CelebrationManager {
     // Generar HTML del popup
     generatePopupHTML(imgObj) {
         const alreadyPublished = imgObj.publishedToInstagram || false;
-        
+        const showSuccessNow = !!imgObj.__justSharedInstagram;
+        if (showSuccessNow) {
+            try { delete imgObj.__justSharedInstagram; } catch (_) {}
+        }
+
         return `
             <div style="font-size: 48px; margin-bottom: 15px;">🎉</div>
             <h2 style="margin: 0 0 10px 0; font-size: 28px;">Congratulations!</h2>
             <p style="margin: 0 0 20px 0; font-size: 16px; opacity: 0.9;">You've completed the puzzle!</p>
             
             <div style="margin-bottom: 20px;">
-                ${alreadyPublished ? this.generateAlreadyPublishedHTML(imgObj) : this.generateShareOptionsHTML()}
+                ${showSuccessNow
+                    ? this.generateJustSharedHTML(imgObj)
+                    : (alreadyPublished ? this.generateAlreadyPublishedHTML(imgObj) : this.generateShareOptionsHTML())}
             </div>
             
             <div id="upload-status" style="margin-top: 15px; font-size: 14px; min-height: 20px;"></div>
         `;
     }
 
+    // Generar HTML para recién compartido con éxito
+    generateJustSharedHTML(imgObj) {
+        return `
+            <p style="margin: 0 0 15px 0; font-size: 14px; color: #22d07a;">✅ Successfully shared on Instagram!</p>
+            ${imgObj.instagramPermalink ? `
+                <a href="${imgObj.instagramPermalink}" target="_blank" style="
+                    display: inline-block;
+                    background: linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%);
+                    color: white;
+                    text-decoration: none;
+                    padding: 10px 20px;
+                    border-radius: 25px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    margin: 0 10px 15px 0;
+                    transition: transform 0.3s ease;
+                ">
+                    📱 View on Instagram
+                </a>
+            ` : ''}
+            <button id="skip-upload" style="
+                background: rgba(255,255,255,0.2);
+                border: 2px solid white;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 25px;
+                cursor: pointer;
+                font-size: 14px;
+                transition: all 0.3s ease;
+                margin: 0 auto;
+                display: block;
+            ">
+                Close
+            </button>
+        `;
+    }
+
     // Generar HTML para puzzle ya publicado
     generateAlreadyPublishedHTML(imgObj) {
         return `
-            <p style="margin: 0 0 15px 0; font-size: 14px; color: #FFD700;">✨ Already shared on Instagram!</p>
+            <p style="margin: 0 0 15px 0; font-size: 14px; color: #FFD700;">This image has been shared on Instagram already.</p>
             ${imgObj.instagramPermalink ? `
                 <a href="${imgObj.instagramPermalink}" target="_blank" style="
                     display: inline-block;
